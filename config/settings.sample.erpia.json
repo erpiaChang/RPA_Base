@@ -1,0 +1,22 @@
+{
+  "target_exe": "",
+  "target_exe_name": "",
+  "target_work_dir": "",
+  "target_args": [],
+  "window_title_re": "",
+  "window_class_name": "",
+  "login_company_code": "",
+  "login_user_id": "",
+  "login_password": "",
+  "collect_sources": [],
+  "excel_dir": "",
+  "collect_site_code": "",
+  "excel_path": "",
+  "delivery_company": "",
+  "delivery_box": "",
+  "logistics_mode": "",
+  "sales_mode": "",
+  "excel_passwords": {},
+  "excel_password": "",
+  "hold_exclude_codes": []
+}

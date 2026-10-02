@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net https://cdn.sheetjs.com; connect-src __SUPABASE_URL__; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<title>RPA 현황</title>
+<!--
+  RPA 서버 대시보드 (docs/SERVER_PLAN.md B-5·D). 정적 페이지 한 장 — 서버 코드 없음. 화면 코드는 app.js
+  (CSP script-src 'self' 라 인라인 스크립트는 실행되지 않는다 — 이 파일에 스크립트 본문을 쓰지 말 것).
+  규칙: 서버에서 온 문자열은 전부 textContent 로만 그린다 (innerHTML 금지). 없는 숫자를 만들지 않는다.
+  화면: 위쪽 탭 넷(요약·사용량·PC·실행 기록) + 어디서나 여는 [사용법 질문] 패널 (09-28 개편).
+  설정은 config.js. 배포는 Cloudflare Workers (같은 폴더의 _headers 가 CSP 를 준다).
+-->
+<style>
+  :root { --bg:#f4f6f9; --card:#fff; --ink:#111827; --dim:#4b5563; --line:#e3e7ee; --soft:#f8fafc;
+          --brand:#1d4ed8; --brand-soft:#e8efff; --ok:#15803d; --bad:#b91c1c; --warn:#a15c07; --run:#1d4ed8; --mute:#6b7280;
+          --head:#0f172a; --radius:10px; --shadow:0 1px 2px rgba(15,23,42,.06), 0 1px 3px rgba(15,23,42,.08); }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 "Malgun Gothic","Apple SD Gothic Neo",sans-serif; }
+  button, input, select, textarea { font:inherit; }
+
+  /* 머리 — 이름 · 업체 고르기 · 로그인한 사람 */
+  header.top { display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; padding:10px 20px; background:var(--head); color:#eef3f8; }
+  header.top h1 { font-size:17px; margin:0; flex:1; letter-spacing:-.2px; }
+  header.top select { padding:5px 8px; border-radius:6px; border:1px solid #334155; background:#1e293b; color:#eef3f8; }
+  header.top button { padding:5px 12px; border-radius:6px; border:1px solid #334155; background:transparent; color:#eef3f8; cursor:pointer; }
+  header.top .who { color:#cbd5e1; font-size:13px; }
+  header.top :focus-visible { outline-color:#93c5fd; }   /* 어두운 머리줄 — 초점 테두리 대비 3:1 이상 */
+
+  /* 탭 — 같은 층위의 화면 넷. 폭이 좁으면 옆으로 민다 */
+  nav.tabs { display:flex; gap:4px; padding:0 20px; background:var(--card); border-bottom:1px solid var(--line); overflow-x:auto; }
+  nav.tabs button { border:0; background:none; padding:12px 14px; color:var(--dim); cursor:pointer; border-bottom:3px solid transparent; white-space:nowrap; font-weight:600; }
+  nav.tabs button[aria-current="page"] { color:var(--brand); border-bottom-color:var(--brand); }
+  nav.tabs button:hover { color:var(--ink); }
+
+  main { max-width:1180px; margin:0 auto; padding:20px 20px 96px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px 18px; margin-bottom:16px; box-shadow:var(--shadow); }
+  h2 { font-size:15px; margin:0 0 12px; color:var(--ink); font-weight:700; }
+  .page-title { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:0 0 14px; }
+  .page-title h2 { font-size:19px; margin:0; flex:1; }
+
+  /* 요약 숫자 카드 */
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:16px; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px; box-shadow:var(--shadow); }
+  .stat.clickable { cursor:pointer; }
+  .stat.clickable:hover { border-color:var(--brand); }
+  .stat .label { color:var(--dim); font-size:13px; }
+  .stat .value { font-size:26px; font-weight:700; margin:2px 0; letter-spacing:-.5px; }
+  .stat .sub { color:var(--dim); font-size:12.5px; }
+  .stat.bad .value { color:var(--bad); }
+  .stats.usage { grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+  .stats.usage .stat.primary { grid-column:span 2; }
+  .stat.primary { background:var(--brand-soft); border-color:#c7d4f5; }
+  .stat.primary .value { color:#1e3a8a; font-size:30px; }
+  .note.period { margin:-8px 0 14px; }
+
+  /* 표 — 숫자는 오른쪽. 좁으면 표만 옆으로 민다 */
+  .tscroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; word-break:keep-all; }
+  td.nowrap, .nowrap { white-space:nowrap; }
+  th button.sort { border:0; background:none; padding:0; font:inherit; color:inherit; font-weight:600; cursor:pointer; }
+  th.num button.sort { text-align:right; }
+  tr.clickable:focus-visible { outline-offset:-2px; }
+  .narrow-only { display:none; }
+  th { color:var(--dim); font-weight:600; white-space:nowrap; font-size:13px; background:var(--soft); }
+  th.num, td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  tr.clickable { cursor:pointer; }
+  tr.clickable:hover { background:#f1f5fb; }
+  tfoot td { font-weight:700; background:var(--soft); }
+
+  /* 상태 — 색만으로 말하지 않는다 (점 + 글자) */
+  .state-running, .state-done, .state-failed, .state-lost, .state-unfinished, .state-cancelled, .state-skipped, .state-pending {
+    display:inline-flex; align-items:center; gap:6px; font-weight:600; }
+  .state-running::before, .state-done::before, .state-failed::before, .state-lost::before, .state-unfinished::before,
+  .state-cancelled::before, .state-skipped::before, .state-pending::before { content:""; width:8px; height:8px; border-radius:50%; background:currentColor; flex:none; }
+  .state-running { color:var(--run); }
+  .state-done { color:var(--ok); }
+  .state-failed, .state-lost { color:var(--bad); }
+  .state-unfinished, .state-cancelled, .state-skipped { color:var(--warn); }
+  .state-pending { color:var(--mute); font-weight:400; }
+
+  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px; }
+  .card { border:1px solid var(--line); border-radius:var(--radius); padding:12px 14px; background:var(--soft); }
+  .card.clickable { cursor:pointer; }
+  .card.clickable:hover { border-color:var(--brand); }
+  .card .big, .big { font-size:17px; font-weight:700; margin:2px 0; }
+  .card .row { display:flex; justify-content:space-between; gap:8px; color:var(--dim); font-size:13px; }
+  .bar { height:8px; background:#e6ebf1; border-radius:4px; overflow:hidden; margin:6px 0; }
+  .bar > div { height:100%; background:var(--run); }
+  .tag { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; background:#eef2f7; color:var(--dim); margin-left:6px; font-weight:600; }
+  .tag.ok { background:#e6f4ea; color:var(--ok); }
+  .tag.bad { background:#fde8ec; color:var(--bad); }
+  .tag.warn { background:#fff4e0; color:var(--warn); }
+  .note { color:var(--dim); font-size:13px; }
+  .err { color:var(--bad); }
+  .empty { padding:18px 4px; color:var(--dim); text-align:center; }
+
+  /* 사용량 — 기간 고르기 + 일별 막대 (외부 라이브러리 없이 CSS) */
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--card); }
+  .seg button { border:0; background:none; padding:7px 14px; cursor:pointer; color:var(--dim); font-weight:600; }
+  .seg button + button { border-left:1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background:var(--brand); color:#fff; }
+  .chart { position:relative; display:flex; align-items:flex-end; gap:3px; height:190px; padding:20px 0 0; border-bottom:1px solid var(--line); }
+  .chart .ymax { position:absolute; top:0; left:0; font-size:11px; color:var(--mute); }
+  .chart .col { flex:1; min-width:0; height:100%; display:flex; flex-direction:column; justify-content:flex-end; }
+  .chart .col > div { background:var(--brand); border-radius:3px 3px 0 0; min-height:2px; }
+  .chart .col.zero > div { background:#dbe3ef; }
+  .chart .col:hover > div { background:#1e3a8a; }
+  .axis { display:flex; gap:3px; font-size:11px; color:var(--mute); margin-top:4px; }
+  .axis span { flex:1; min-width:0; text-align:center; white-space:nowrap; overflow:visible; }
+  details summary { cursor:pointer; color:var(--dim); font-size:13px; margin-top:10px; }
+
+  form.login { max-width:380px; margin:64px auto; display:grid; gap:10px; background:var(--card); padding:28px; border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); }
+  form.login h2 { font-size:19px; }
+  form.login label { font-size:13px; color:var(--dim); display:grid; gap:4px; }
+  input, button, select { padding:7px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; }
+  button { cursor:pointer; }
+  button:disabled { cursor:not-allowed; opacity:.55; }
+  button.primary { background:var(--brand); color:#fff; border-color:var(--brand); font-weight:600; }
+  button.link { border:0; background:none; color:var(--brand); padding:0; font-weight:600; }
+  :focus-visible { outline:2px solid var(--brand); outline-offset:2px; }
+  .toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
+  .log { font-size:13px; }
+  .log .warning { color:var(--warn); } .log .error { color:var(--bad); }
+  .hidden { display:none !important; }
+  .form { display:grid; grid-template-columns:170px 1fr; gap:10px 14px; align-items:start; margin:10px 0; }
+  .form input[type=text], .form textarea { width:100%; max-width:520px; }
+  .form input[type=number] { width:110px; }
+  textarea { font:inherit; padding:7px 10px; border:1px solid var(--line); border-radius:6px; }
+  label.check { margin-right:14px; white-space:nowrap; }
+
+  /* 사용법 질문 — 오른쪽 아래 단추 + 옆 패널. 입력칸은 패널 아래에 늘 보이고 대화만 스크롤한다 */
+  .help-fab { position:fixed; right:20px; bottom:20px; z-index:30; display:flex; align-items:center; gap:8px; padding:11px 18px;
+              border-radius:999px; border:0; background:var(--brand); color:#fff; font-weight:700; box-shadow:0 6px 18px rgba(29,78,216,.35); }
+  .help-fab .q { display:inline-grid; place-items:center; width:22px; height:22px; border-radius:50%; background:#fff; color:var(--brand); font-size:14px; }
+  .help-panel { position:fixed; top:0; right:0; bottom:0; z-index:40; width:420px; max-width:100vw; height:100dvh; display:flex; flex-direction:column;
+                background:var(--card); border-left:1px solid var(--line); box-shadow:-8px 0 24px rgba(15,23,42,.14); }
+  .help-head { display:flex; align-items:center; gap:8px; padding:14px 16px; border-bottom:1px solid var(--line); }
+  .help-head h2 { margin:0; flex:1; }
+  .help-head button { border:0; background:none; font-size:22px; line-height:1; padding:2px 8px; color:var(--dim); }
+  .help-log { flex:1; overflow-y:auto; padding:14px 16px; position:relative; background:var(--soft); }
+  .help-empty { display:grid; gap:10px; padding:8px 0; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chips button { border:1px solid #c7d4f5; background:var(--brand-soft); color:#1e3a8a; border-radius:999px; padding:6px 12px; font-size:13px; }
+  .qa { padding:6px 0 10px; display:flex; flex-direction:column; gap:6px; }
+  .qa .q { align-self:flex-end; max-width:88%; background:var(--brand); color:#fff; padding:8px 12px; border-radius:14px 14px 4px 14px; white-space:pre-wrap; }
+  .qa .a { white-space:pre-wrap; align-self:flex-start; max-width:92%; background:var(--card); border:1px solid var(--line); padding:9px 12px; border-radius:14px 14px 14px 4px; }
+  .qa .a:empty { display:none; }
+  .qa .s { font-size:12.5px; }
+  .help-input { border-top:1px solid var(--line); padding:10px 12px 12px; display:grid; gap:6px; background:var(--card); }
+  .help-input textarea { width:100%; resize:none; min-height:44px; max-height:140px; }
+  .help-input .row { display:flex; align-items:center; gap:8px; }
+  .help-input .row .note { flex:1; }
+  .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+
+  /* 넓은 화면에서 질문 패널을 열면 본문이 옆으로 비켜 준다 — 패널이 표·단추를 가리지 않게 */
+  @media (min-width:1100px) {
+    body.help-open header.top, body.help-open nav.tabs { margin-right:420px; }
+    body.help-open main { max-width:none; margin:0 420px 0 0; }
+  }
+  @media (max-width:640px) {
+    th.opt, td.opt { display:none; }
+    header.top .who { display:none; }
+    header.top h1 { white-space:nowrap; }
+    .stats, .stats.usage { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    .stat.primary, .stats.usage .stat.primary { grid-column:1 / -1; }
+    .narrow-only { display:block; }
+    .stat { padding:12px; }
+    main { padding:12px 12px 90px; }
+    header.top { padding:10px 12px; }
+    nav.tabs { padding:0 8px; }
+    .form { grid-template-columns:1fr; }
+    .stat .value { font-size:22px; }
+    .help-panel { width:100vw; border-left:0; }
+    .help-fab { right:12px; bottom:12px; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>RPA 현황</h1>
+  <select id="accountSel" class="hidden" aria-label="업체 고르기"></select>
+  <span id="who" class="who"></span>
+  <button id="logoutBtn" class="hidden">로그아웃</button>
+</header>
+<nav id="tabs" class="tabs hidden" aria-label="화면"></nav>
+<main id="main"></main>
+<button id="helpBtn" class="help-fab hidden" aria-haspopup="dialog" aria-controls="helpPanel"><span class="q" aria-hidden="true">?</span>사용법 질문</button>
+<aside id="helpPanel" class="help-panel hidden" role="dialog" aria-label="사용법 질문"></aside>
+
+<!-- CDN 은 정식 배포 파일만 (jsdelivr 가 즉석에서 만드는 .min.js 는 SRI 가 깨진다). 버전을 올리면 해시를 다시 잰다 (README) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.116.0/dist/umd/supabase.js"
+        integrity="sha384-iLddHTLokph6Omwoyid4XKxHaWa6w41BnoEj0q5oOrzmYPpHIKt1wyjReA7s//pP" crossorigin="anonymous"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"
+        integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT" crossorigin="anonymous"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

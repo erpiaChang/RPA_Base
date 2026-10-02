@@ -1,0 +1,9 @@
+// Cloudflare Workers 정적 파일 배포 설정 (09-28). `deploy_web.bat` 이 `npx wrangler@4 deploy` 로 쓴다.
+// 이름이 주소 앞부분이다: https://rpa-dashboard.<계정 서브도메인>.workers.dev — 바꾸면 주소가 바뀐다.
+// 올리는 폴더는 build/web — `tools/build_web` 이 .env 값으로 자리표시를 채워 만든다 (10-02). `_headers` 는 응답 헤더가 된다.
+{
+  "name": "rpa-dashboard",
+  "compatibility_date": "2026-09-01",
+  "assets": { "directory": "../build/web" },
+  "preview_urls": false      // 버전별 미리보기 주소를 안 만든다 — 대시보드 주소는 하나만
+}

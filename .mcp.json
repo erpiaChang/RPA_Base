@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "serena": {
+      "command": "serena.exe",
+      "args": [
+        "start-mcp-server",
+        "--context",
+        "claude-code",
+        "--project-from-cwd"
+      ]
+    },
+    "supabase-rw": {
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp"
+    }
+  }
+}

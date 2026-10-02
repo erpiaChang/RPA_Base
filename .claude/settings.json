@@ -1,0 +1,136 @@
+{
+  "env": {
+    "PONYTAIL_SUBAGENT_MATCHER": "^(?!rpa-)",
+    "PONYTAIL_DEFAULT_MODE": "lite"
+  },
+  "permissions": {
+    "deny": [
+      "mcp__serena__replace_content",
+      "mcp__serena__replace_in_files",
+      "mcp__serena__replace_symbol_body",
+      "mcp__serena__insert_after_symbol",
+      "mcp__serena__insert_before_symbol",
+      "mcp__serena__rename_symbol",
+      "mcp__serena__safe_delete_symbol",
+      "mcp__serena__create_text_file",
+      "mcp__serena__delete_lines",
+      "mcp__serena__insert_at_line",
+      "mcp__serena__replace_lines",
+      "mcp__serena__execute_shell_command",
+      "mcp__plugin_supabase_supabase__execute_sql",
+      "mcp__plugin_supabase_supabase__apply_migration",
+      "mcp__plugin_supabase_supabase__deploy_edge_function",
+      "mcp__plugin_supabase_supabase__create_project",
+      "mcp__plugin_supabase_supabase__pause_project",
+      "mcp__plugin_supabase_supabase__restore_project",
+      "mcp__plugin_supabase_supabase__create_branch",
+      "mcp__plugin_supabase_supabase__delete_branch",
+      "mcp__plugin_supabase_supabase__merge_branch",
+      "mcp__plugin_supabase_supabase__reset_branch",
+      "mcp__plugin_supabase_supabase__rebase_branch",
+      "mcp__supabase-ro__apply_migration",
+      "mcp__supabase-ro__deploy_edge_function",
+      "mcp__supabase-ro__create_project",
+      "mcp__supabase-ro__pause_project",
+      "mcp__supabase-ro__restore_project",
+      "mcp__supabase-ro__create_branch",
+      "mcp__supabase-ro__delete_branch",
+      "mcp__supabase-ro__merge_branch",
+      "mcp__supabase-ro__reset_branch",
+      "mcp__supabase-ro__rebase_branch",
+      "mcp__supabase-rw__deploy_edge_function",
+      "mcp__supabase-rw__create_project",
+      "mcp__supabase-rw__pause_project",
+      "mcp__supabase-rw__restore_project",
+      "mcp__supabase-rw__create_branch",
+      "mcp__supabase-rw__delete_branch",
+      "mcp__supabase-rw__merge_branch",
+      "mcp__supabase-rw__reset_branch",
+      "mcp__supabase-rw__rebase_branch"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Write|Edit|NotebookEdit|Glob|Grep|Bash|PowerShell|mcp__serena__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_paths.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/confirm_run.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_secrets.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__supabase-rw__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_sql.py\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "serena-hooks.exe activate --client=claude-code"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "serena-hooks.exe cleanup --client=claude-code"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/check_rpa_rules.py\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/cleanup_temp.py\""
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {}
+}

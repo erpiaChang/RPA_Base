@@ -1,0 +1,16 @@
+comtypes==1.4.16
+pillow==12.3.0
+pywin32==312
+pywinauto==0.6.9
+six==1.17.0
+
+# 빌드 전용 (실행에는 필요 없다)
+pyinstaller==6.22.2
+
+# 개발/계측 전용 (tools/probe_resources.py). **배포본에 들어가지 않는다.**
+# build_*.spec 의 UNUSED_LIBS 에서 제외한다.
+psutil==7.2.2
+
+# 수집 RPA (브라우저 자동화). channel="msedge" 로 이미 설치된 Edge 를 쓰므로
+# `playwright install` 로 브라우저 번들을 내려받지 않는다.
+playwright==1.62.0

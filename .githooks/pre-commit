@@ -1,0 +1,3 @@
+#!/bin/sh
+# 커밋할 내용에 실값이 없나 (tools/probe_leaks --staged). 값은 찍지 않는다 — CLAUDE.md git 절
+exec .venv/Scripts/python.exe -m tools.probe_leaks --staged

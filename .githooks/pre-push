@@ -1,0 +1,3 @@
+#!/bin/sh
+# 올리는 커밋의 파일·작성자·메시지를 본다 (tools/probe_leaks --pre-push, git 이 stdin 으로 올릴 ref 를 준다) — CLAUDE.md git 절
+exec .venv/Scripts/python.exe -m tools.probe_leaks --pre-push

@@ -1,0 +1,46 @@
+.venv/
+__pycache__/
+*.pyc
+logs/
+docs/_dump_*.txt
+docs/_windows_*.txt
+# 비밀번호·계정·빌드 ID 가 든다 — 절대 올리지 않는다 (docs/SETTINGS.md)
+config/settings.local.json
+config/settings.baked.json
+# 설정이 깨졌을 때 저장이 남기는 사본 — 실값이 그대로 든다 (config/settings.py save_local, 10-02 검토)
+config/settings.local.json.*
+config/*.bak
+# API 주소·키·씨앗 (10-02). 꼴은 .env.example
+.env
+# 업체 정보·실계정 값이 그대로 든 옛 기록 (10-02 사용자 결정 — 이 PC 에만 둔다)
+docs/customers/
+docs/archive/
+# 사이트 파일·그 문서·그 시험 도구 — 업체·시험 사이트의 주소·화면 요소 (10-02, docs/SITES.md). 원본은 비어 있다
+collect/sites/local/
+docs/local/
+tools/local/
+# 업체 전용 코드 (docs/CUSTOMERS.md — 만들 때 이 폴더)
+/customers/
+# 받은 주문 엑셀·매니페스트 — 주문자 개인정보가 든다
+*.xlsx
+*.xls
+*.xlsm
+manifest.json
+*.bundle
+*.zip
+*.pkl
+
+# PyInstaller 빌드 산출물
+build/
+dist/
+*.spec.bak
+
+# 도구 상태 — PC·세션마다 다르다
+.claude/settings.local.json
+.claude/scratch/
+.claude/scheduled_tasks.lock
+.serena/cache/
+web/.wrangler/
+node_modules/
+# /claude-security 리포트 — 반영 뒤 지운다 (CLAUDE.md)
+CLAUDE-SECURITY-*/

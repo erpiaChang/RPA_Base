@@ -1,0 +1,2 @@
+# 훅은 sh 가 읽는다 — CRLF 로 받으면 인자 끝에 CR 이 붙어 검사가 다른 길로 간다 (10-02)
+.githooks/* text eol=lf
