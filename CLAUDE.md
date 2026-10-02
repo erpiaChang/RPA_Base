@@ -165,7 +165,7 @@ VS Code에서 실행할 때도 인터프리터가 `.venv`인지 확인한다.
 | 지우는 명령 | `git reset --hard`·`git checkout -- <경로>`·`git restore`·`git clean`·`git stash` 처럼 커밋 전 변경을 지우는 것은 **사용자 승인 뒤에만** (남의 작업까지 지운다) |
 | 메시지 | 한국어 한 줄 요약 + 필요하면 본문 |
 | 빌드 | 빌드 전에 커밋하고, 그 해시를 `docs/HANDOFF.md` 의 exe 줄에 적는다 |
-| 원격 (GitHub 비공개) | `origin` = `RPA_Base` (10-02 첫 push). push 는 사용자 승인 뒤 `APPROVED-RUN` 으로. 작성자는 저장소 설정의 GitHub noreply 주소 — 전역 설정(기기 이름·회사 메일)으로 커밋하지 않는다 |
+| 원격 (GitHub **공개**) | `origin` = `RPA_Base` (10-02 비공개로 첫 push, 같은 날 사용자가 공개로 바꿈 — **누구나 본다.** 한 번 올라간 실값은 기록을 고쳐도 남의 사본에 남는다). push 는 사용자 승인 뒤 `APPROVED-RUN` 으로. 작성자는 저장소 설정의 GitHub noreply 주소 — 전역 설정(기기 이름·회사 메일)으로 커밋하지 않는다 |
 | **git 에 넣지 않는 값** (사용자 확정 10-02) | 실계정·개인정보·업체 정보·아이디·이메일·전화번호·내부 IP·기기 이름·Windows 사용자 경로·API 주소·키·씨앗·**이 PC·이 계정의 설정값**. 코드·문서·테스트 예시에도 쓰지 않는다 — 예시는 `user01`·`comp01`·`홍길동`·`사이트A`·`택배사A`·`박스A`·`상품A`·`user01@example.com`·`192.0.2.50`·`%USERPROFILE%` 같은 가짜로. **설정값은 기본값으로도 코드에 두지 않는다** (선택지 목록만) |
 | 그 값은 어디에 | RPA 프로그램 값 → `config/settings.local.json` / 웹 주소·키·구운 값 씨앗 → `.env` (꼴 `.env.example`). 둘 다 git 밖 |
 | git 밖 폴더 | `logs/`·`dist/`·`build/`·`docs/archive/`(옛 기록 — 실값이 그대로)·`docs/customers/`(업체 정보)·**사이트 전용** `collect/sites/local/`·`tools/local/`·`docs/local/` (원본에는 메일 사이트가 없다 — `docs/SITES.md`). 새로 만드는 파일에 실값이 들면 `.gitignore` 부터 |
