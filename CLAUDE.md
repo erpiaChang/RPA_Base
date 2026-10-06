@@ -26,7 +26,7 @@
 ## 현재 상태
 
 **작업을 시작하면 `docs/HANDOFF.md` 부터 읽는다** — 지금 상태·열린 항목·함정·새 세션 프롬프트가 거기 있다.
-RPA 3종과 서버 연동(스키마·보고·웹·원격 제어·사용법 질문·사용량)이 다 붙었고, 빌드본으로 저장까지 완주했다.
+실행용 RPA(흐름: 메일 → 주문수집·매출처리 → 물류대기 → 물류관리)와 서버 연동(스키마·보고·웹·원격 제어·사용법 질문·사용량)이 다 붙었고, 빌드본으로 저장까지 완주했다.
 **`dist/` 의 exe 는 시험 빌드다** — 실사용 exe 는 다음 빌드에서 만든다.
 
 **코드를 고쳤으면 확인 도구부터 돌린다** — 대상 프로그램을 건드리지 않는다. 각 도구가 무엇을 보는지는
@@ -34,7 +34,7 @@ RPA 3종과 서버 연동(스키마·보고·웹·원격 제어·사용법 질�
 
 | 고친 곳 | 돌릴 것 (건수) |
 | --- | --- |
-| 흐름·단계·결과 문구 (`orchestrator/`) | `probe_progress` 47 · `probe_failure` 54 · `probe_pipeline` 41 · `probe_report` 12 · `probe_modules` 90 (통합 흐름·기능 선택·메일 실패 뒤 계속) |
+| 흐름·단계·결과 문구 (`orchestrator/`) | `probe_progress` 47 · `probe_failure` 54 · `probe_pipeline` 41 · `probe_report` 12 · `probe_modules` 90 (실행 창 흐름·기능 선택·메일 실패 뒤 계속) |
 | **사용자에게 보이는 글** (어디든) | `probe_userlog` 114 — **필수** |
 | ERPia 조작 (`automation/`, `utils/ui.py`) | `probe_hold_loop` 53 · `probe_rect_settle` 27 · `probe_failure` 54 |
 | 창·화면 (`gui/`) | `probe_gui`(실패 0) · `probe_modules` 90 · `probe_overlay` 81(화면이 잠겨 있으면 73) · `probe_history` 19 — **찍어서 본다** (`probe_shot --stages`, `probe_modules --shot`) |
@@ -71,8 +71,8 @@ RPA 3종과 서버 연동(스키마·보고·웹·원격 제어·사용법 질�
 | 콘솔 빌드 (설정 그대로, 서버 등록 없이 지금 빌드 ID 로) | `.venv\Scripts\python.exe -m tools.build_run` → `dist/run/RPA_1.exe` |
 | 굽는 설정 만들기 (읽기 전용) | `.venv/Scripts/python.exe -m tools.bake_settings` |
 | 창 목록 조사 (읽기 전용) | `survey.bat` (또는 `.venv\Scripts\python.exe -m tools.survey_windows --save`) |
-| 수집 RPA 설정 점검 (읽기 전용) | `.venv\Scripts\python.exe -m tools.test_collect --check` |
-| 수집 RPA 실행 (조작) | `.venv\Scripts\python.exe -m tools.test_collect` (먼저 `--dry-run`) |
+| 메일 단계 설정 점검 (개발, 읽기 전용) | `.venv\Scripts\python.exe -m tools.test_collect --check` |
+| 메일 단계만 실행 (개발, 조작) | `.venv\Scripts\python.exe -m tools.test_collect` (먼저 `--dry-run`) |
 | 단계·중단·구간 확인 (읽기 전용) | `.venv\Scripts\python.exe -m tools.probe_progress` |
 | 창·단계표 확인 (읽기 전용) | `.venv\Scripts\python.exe -m tools.probe_gui` |
 | 구간 실행 (조작) | `.venv\Scripts\python.exe -m tools.test_flow --from <단계> --yes` (먼저 `--dry-run`) |
@@ -85,7 +85,7 @@ RPA 3종과 서버 연동(스키마·보고·웹·원격 제어·사용법 질�
 `ModuleNotFoundError`가 나고, 더블클릭하면 창이 즉시 닫혀 "아무 일도 없는 것"처럼 보인다.
 VS Code에서 실행할 때도 인터프리터가 `.venv`인지 확인한다.
 
-`tools/`는 **개발 전용**이라 배포본에 들어가지 않는다. `automation/`은 제품 코드다.
+`tools/`는 **개발 전용**이라 exe 에 들어가지 않는다. `automation/`은 제품 코드다.
 `tools/probe_*`는 읽기 전용, `tools/test_*`는 실제로 조작한다. 섞지 않는다.
 
 ## 파일 접근 범위
@@ -183,7 +183,7 @@ VS Code에서 실행할 때도 인터프리터가 `.venv`인지 확인한다.
 - **삭제는 사용자 승인을 받고 한다.** git 으로 관리한다 (10-02) — 커밋된 것은 되살릴 수 있지만, 커밋 전 변경과 무시 대상(`logs/`·`dist/`·`config/settings.local.json`)은 지우면 끝이다.
 - 새 도구: `probe_*` 읽기 전용 / `test_*` 조작(첫 줄에 그렇다고 적는다).
   `_probe_xxx.py` 같은 임시 이름으로 두지 않고, `docs/PROGRESS.md` 코드 지도에 한 줄 남긴다.
-- `build_*.spec`의 `DEV_ONLY`가 `tools`를 통째로 빼므로 배포본에는 들어가지 않는다.
+- `build_run.spec`의 `DEV_ONLY`가 `tools`를 통째로 빼므로 exe 에는 들어가지 않는다.
 
 ## 로그 / 임시 산출물 — 이건 지운다
 
@@ -258,7 +258,7 @@ gui/          run_app(실행용 창) / erpia_app(그 부모 — 실행·예외 �
 orchestrator/ 업무 흐름 묶음: collect_flow / erpia_flow / full_flow / common / modules(기능 선택) /
               steps·steps_erpia·steps_collect(단계 표) / friendly(실패를 사람 말로) / report(HTML) / history(지난 실행 이력) /
               telemetry(서버 보고 — 큐·스레드·outbox)
-              (run_app 은 full_flow 를 쓴다. 통합과 같은 흐름이다)
+              (run_app 은 full_flow 를 쓴다. collect_flow·erpia_flow 는 그 부품이자 개발 도구 test_collect·test_flow 의 흐름)
 automation/   ERPia 조작: application, login, updater(업데이트·UAC), sidebar(프로세스바 id),
               order_mapping, logistics_wait, logistics
 collect/      메일 수집 틀: webmail(MailSite 계약·로그인·수집), browser, sites(사이트 목록 — 사이트 파일은 git 밖 sites/local),

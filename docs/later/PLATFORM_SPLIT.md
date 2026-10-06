@@ -2,6 +2,11 @@
 
 기준일 2026-09-17. **조사 문서다. 코드는 고치지 않았다.**
 
+> ★ **10-06 정리 뒤 구조가 달라졌다.** 기능별 빌드(`build_collect/erpia/full`)·진입점(`main.py`·`main_collect/erpia/full.py`)·
+> 런처(`gui/launcher.py`)·기능별 창(`gui/collect_app.py`·`full_app.py`)·`FORBIDDEN` 은 지웠다. 아래 표에서 그 행은 옛 구조다.
+> 지금 남은 것: 진입점 `main_run.py`, 창 `gui/run_app.py`(부모 `gui/erpia_app.py`), 빌드 `build_run.spec` 하나 (`docs/BUILD.md`).
+> 창의 구간 실행 UI 도 꺼져 있다 (구간 실행은 `tools/test_flow --from`).
+
 방향(사용자 확정): 새 프로그램이 오면 "공용 코어 + 프로그램별 어댑터" 로 만든다.
 코어를 실제로 떼어 내는 일은 **두 번째 프로그램이 들어올 때** 한다 — 그 전에 나누면
 경계를 추측으로 긋게 된다. 이 문서는 그때 쓸 지도다.

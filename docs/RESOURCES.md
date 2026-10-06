@@ -11,7 +11,7 @@ RPA 는 오래 켜두고 반복 실행할 프로그램이라 **누수와 CPU 점
 | `tools/probe_search_trace.py` | 컨트롤 탐색 집계. 캐시 후보·위험 자동 판정 (읽기 전용) |
 | `tools/test_flow.py --trace --resources` | 1회 실행에 위 둘을 붙인다 |
 
-`psutil==7.2.2` 는 **계측 전용**이다. `build_*.spec` 의 `UNUSED_LIBS` 로 배포본에서 제외한다.
+`psutil==7.2.2` 는 **계측 전용**이다. `build_run.spec` 의 `UNUSED_LIBS` 로 exe 에서 제외한다.
 
 ---
 
