@@ -524,7 +524,7 @@ def select_courier(screen, name: str, pid: int | None, dry_run: bool = False) ->
     """[업체] 드롭다운에서 택배사를 고른다."""
     if not name:
         raise ScreenError(
-            "택배사가 지정되지 않았다. 런처에서 [택배사] 를 입력하거나 "
+            "택배사가 지정되지 않았다. 실행 창 [설정] 에서 [택배사] 를 고르거나 "
             "config/settings.local.json 의 delivery_company 를 채울 것."
         )
     _select_from_dropdown(_courier_combo(screen), name, pid, "택배사", dry_run=dry_run)
@@ -538,7 +538,7 @@ def select_box(screen, name: str, pid: int | None, dry_run: bool = False) -> Non
     """
     if not name:
         raise ScreenError(
-            "박스가 지정되지 않았다. 런처에서 [박스] 를 입력하거나 "
+            "박스가 지정되지 않았다. 실행 창 [설정] 에서 [박스] 를 고르거나 "
             "config/settings.local.json 의 delivery_box 를 채울 것."
         )
     _select_from_dropdown(_box_combo(screen), name, pid, "박스", dry_run=dry_run)

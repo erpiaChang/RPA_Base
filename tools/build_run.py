@@ -1,4 +1,4 @@
-r"""[개발 전용 — 빌드] 실행용 exe 를 만든다. `build_run.bat` 과 빌드 프로그램(`gui/build_app.py`)이 같이 쓴다.
+r"""[개발 전용 — 빌드] 실행용 exe 를 만든다. 빌드 프로그램(`gui/build_app.py`)이 쓴다. 콘솔에서 바로 돌리면 설정 그대로·서버 등록 없이(지금 빌드 ID 그대로) 굽는다.
 
     .venv\Scripts\python.exe -m tools.build_run
 

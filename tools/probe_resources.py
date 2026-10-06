@@ -12,7 +12,7 @@ RPA 는 오래 켜두고 반복 실행할 프로그램이라 **누수가 있으�
         ...업무 흐름...
     res.report()
 
-빌드에는 포함되지 않는다(`build.spec` 의 `DEV_ONLY`).
+빌드에는 포함되지 않는다(`build_run.spec` 의 `DEV_ONLY`).
 
 ## 무엇을 보는가
 

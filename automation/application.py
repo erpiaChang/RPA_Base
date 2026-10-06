@@ -554,7 +554,7 @@ def close_others(exe: str, keep_pid: int | None, title_re: str) -> list[int]:
                     "기존 인스턴스(pid=%s)가 **관리자 권한**이라 닫을 수 없다.\n"
                     "  RPA 는 일반 권한이라 UIPI 로 막힌다. 그 인스턴스가 로그인돼 있으면\n"
                     "  이후 실행이 계속 중복 로그인으로 실패한다.\n"
-                    "  해당 창을 직접 닫거나, run_admin.bat 으로 RPA 를 관리자 권한으로 실행할 것.",
+                    "  해당 창을 직접 닫거나, RPA exe 를 관리자 권한으로 실행할 것.",
                     pid,
                 )
             else:

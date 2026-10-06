@@ -2,18 +2,17 @@
 r"""PyInstaller 빌드 정의 — 실행용(설정을 구워 넣는다).
 
     build_tool.bat            빌드 프로그램 — 설정을 화면에서 고쳐서 빌드 (gui/build_app.py)
-    build_run.bat             콘솔 — 둘 다 tools/build_run.py 가 아래를 순서대로 한다:
+    .venv\Scripts\python.exe -m tools.build_run   콘솔 — 설정 그대로, 서버 등록 없이
+    둘 다 tools/build_run.py 가 아래를 순서대로 한다:
     .venv\Scripts\python.exe -m tools.bake_settings
     .venv\Scripts\python.exe -m PyInstaller build_run.spec --noconfirm --distpath "dist\run"
 
 산출물: dist\run\RPA_1.exe
 
-## 통합 빌드와 무엇이 다른가
+## 유일한 빌드다 (10-06 — 기능별 빌드 collect/erpia/full 을 지웠다)
 
-흐름은 통합과 **같다**(`orchestrator/full_flow.py`). 다른 것은 둘뿐이다.
-
-1. 화면이 일곱 가지 입력(실행할 기능·비밀번호 2·수집방식·택배사·박스·자동/수동)만 받는다 (`gui/run_app.py`)
-2. **설정을 번들 안에 구워 넣는다.** 사용자는 exe 만 받아 실행하면 된다
+흐름은 `orchestrator/full_flow.py`, 창은 `gui/run_app.py`. **설정을 번들 안에 구워 넣는다** — 사용자는 exe 만 받아 실행하면 된다.
+기능만 따로 쓰려면 기능 고정(`run_modules_locked`)으로 굽는다. 메일이 없으면 Playwright 만 빠지고 다른 기능의 코드는 들어간다.
 
 구운 파일은 `build/baked/settings.baked.json` 이고 `tools/bake_settings.py` 가 만든다.
 번들 안에서는 `config/settings.baked.json` 이 되며, `config/settings.py` 가
@@ -22,14 +21,7 @@ r"""PyInstaller 빌드 정의 — 실행용(설정을 구워 넣는다).
 ★ 구운 비밀번호는 `baked:` 로 감싸지만 키가 프로그램 안에 있어 **뜯으면 풀린다**
   (`utils/secret.py`). 이 exe 는 **믿을 수 있는 사용자에게만** 준다.
 ★ `run_modules_locked` 가 True 로 구워지면 실행 창의 [실행할 기능] 이 잠긴다 (09-22).
-
-## 배포본을 기능별로 나누는 이유 (사용자 확정 2026-09-08)
-
-배포본 안에 **다른 기능의 코드도, 흔적도 남기지 않는다.** 그래서
-
-1. 진입점을 기능별로 나눴다 (`main_*.py`)
-2. 그래도 기대지 않고, 들어가면 안 되는 모듈 이름을 못 박는다
-3. 빌드 끝에 번들 목록을 검사해서 **하나라도 섞이면 빌드를 중단**한다
+★ 개발 전용 모듈(`DEV_ONLY`)이 번들에 섞이면 빌드 끝 검사가 **빌드를 중단**한다.
 """
 import json
 import os
@@ -59,18 +51,8 @@ for _need in (BAKED_SOURCE, SEED_SOURCE):
 # 개발·조사 전용. 어느 배포본에도 들어가면 안 된다.
 DEV_ONLY = [
     "tools",
-    "gui.launcher",              # 개발용 모드 선택 창
     "gui.build_app",             # 빌드 프로그램
     "llm",                       # LLM 전용 PC 의 워커 (09-28) — RPA 에 들어가면 안 된다
-]
-
-# **이 배포본에 들어가면 안 되는 다른 기능.**
-# 업무 흐름은 통합과 같으므로 뺄 업무 모듈이 없다. 다른 것은 화면뿐이다.
-# `gui.erpia_app` 은 여기 없다 — `gui/run_app.py` 가 그 창을 **상속해서**
-# 실행·예외 처리 로직을 그대로 쓴다. 입력 화면만 다시 그린다.
-FORBIDDEN = [
-    "gui.collect_app",
-    "gui.full_app",
 ]
 
 # 설치돼 있으면 딸려 들어갈 수 있는 무거운 패키지. 이 프로그램은 쓰지 않는다.
@@ -97,7 +79,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    # ★ **`excludes` 에 DEV_ONLY / FORBIDDEN 을 넣지 않는다.**
+    # ★ **`excludes` 에 DEV_ONLY 를 넣지 않는다.**
     #   넣으면 PyInstaller 가 그 이름을 `ExcludedModule` 로 만들어 `a.pure` 에
     #   아예 나타나지 않는다. 그러면 아래 누출 검사가 **항상 통과**한다.
     excludes=UNUSED_LIBS,
@@ -106,8 +88,7 @@ a = Analysis(
 )
 
 # ---------------------------------------------------------------- 확인
-_OURS = ("main", "main_collect", "main_erpia", "main_full", "main_run",
-         "gui", "automation", "collect", "orchestrator", "config", "utils", "tools", "llm")
+_OURS = ("main_run", "gui", "automation", "collect", "orchestrator", "config", "utils", "tools", "llm")
 _bundled = sorted(
     name for name, _path, _kind in a.pure
     if name.split(".")[0] in _OURS
@@ -119,7 +100,7 @@ for _name in _bundled:
 
 # ★ 이 검사가 유일한 안전장치다. `excludes` 로 숨기지 않았으므로,
 #   누군가 금지 모듈을 import 하면 여기서 **빌드가 멈춘다.**
-_blocked = DEV_ONLY + FORBIDDEN
+_blocked = DEV_ONLY
 _leaked = [n for n in _bundled
            if any(n == b or n.startswith(b + ".") for b in _blocked)]
 if _leaked:

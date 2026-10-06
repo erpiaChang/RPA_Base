@@ -12,9 +12,6 @@ r"""모듈 — 사람이 고르는 **기능 단위**이자 **과금 행위 단�
 | 물류관리 | 물류관리 |
 
 프로그램 실행·로그인은 ERPia 모듈을 하나라도 고르면 **자동으로** 들어간다.
-
-이 파일은 수집·ERPia 단계 표를 둘 다 쓴다 → 통합·실행용 배포본에만 들어간다
-(`build_collect.spec` / `build_erpia.spec` 의 FORBIDDEN).
 """
 from __future__ import annotations
 

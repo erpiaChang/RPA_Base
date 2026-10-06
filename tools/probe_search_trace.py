@@ -10,7 +10,7 @@ r"""[개발 전용 / 읽기 전용] 컨트롤 탐색을 집계한다. **무엇�
     trace.report()
 
 `utils/ui.py` 의 `trace_hook` 에 꽂아서 동작한다. 화면을 조작하지 않는다.
-빌드에는 포함되지 않는다(`build.spec` 의 `DEV_ONLY`).
+빌드에는 포함되지 않는다(`build_run.spec` 의 `DEV_ONLY`).
 
 ## 캐시 후보 / 위험 판정
 

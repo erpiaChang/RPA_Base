@@ -175,7 +175,7 @@ RPA가 `Application().start()`로 **직접 띄운** 인스턴스는 RPA와 같�
 
 | 방법 | 내용 | 영향 |
 |---|---|---|
-| A. RPA를 관리자 권한으로 실행 | `run.bat`을 관리자로 실행하거나 manifest에 `requireAdministrator` | 두 경우 모두 자동화 가능. 실행 시 UAC 확인 |
+| A. RPA를 관리자 권한으로 실행 | RPA exe 를 관리자로 실행하거나 manifest에 `requireAdministrator` | 두 경우 모두 자동화 가능. 실행 시 UAC 확인 |
 | B. ERPia를 일반 권한으로 실행 | 바로가기 속성에서 "관리자 권한으로 실행" 해제 | 프로그램이 관리자 권한을 요구하면 불가 |
 | C. 항상 RPA가 직접 ERPia를 띄움 | 현재 동작 유지, 기존 창에는 붙지 않음 | 사용자가 이미 열어둔 창을 못 씀 |
 

@@ -1,4 +1,4 @@
-r"""ERPia 자동화 창 — 입력 폼 + 진행 파이프라인 + 자동 실행 칸. `full_app` / `run_app` 이 상속한다.
+r"""ERPia 자동화 창 — 입력 폼 + 진행 파이프라인 + 자동 실행 칸. `run_app` 이 상속한다.
 
 - 입력: 프로그램 경로([찾기]) / 업체코드 / 아이디 / 비밀번호 / 수집방식 / 택배사 / 박스 / 자동·수동.
   필수값이 다 채워져야 [실행] 이 살아난다. 비밀번호는 `*` 로 보인다.
@@ -24,7 +24,7 @@ from automation.login import LoginError
 from automation import logistics, logistics_wait
 from automation.order_mapping import SALES_MODES, ScreenError
 from config.settings import SETTINGS, save_local
-from gui.common import HELP_FONT_SIZE, DetailPane, FormToggle, apply_scaling
+from gui.common import HELP_FONT_SIZE, DetailPane, FormToggle
 from gui.history_window import HistoryWindow
 from gui.overlay import Overlay
 from gui.pipeline import PipelinePane
@@ -1200,29 +1200,3 @@ def _ui_scale() -> float:
         log.debug("화면 배율을 읽지 못했다(1.0으로 본다): %s", type(exc).__name__)
         return 1.0
 
-
-def run() -> int:
-    # ★ **여기가 배포본의 시작점이다** (`main_erpia.py`). 예전에는 이 두 줄이
-    #   빠져 있어서 ERPia 배포본만 `logs/rpa_YYYYMMDD.log` 가 **아예 생기지
-    #   않았고**, 루트 로거가 WARNING 이라 `step()` 의 진입/종료 로그도 전부
-    #   버려졌다. `console=False` 라 콘솔조차 없어 실패 지점을 알 수 없었다.
-    #   개발 중에는 `gui/launcher.py` 가 먼저 불러 줘서 가려져 있었다
-    #   (2026-09-10 감사).
-    from utils.dpi import ensure_dpi_awareness
-    from utils.logger import setup_logging
-
-    ensure_dpi_awareness()
-    setup_logging()   # 로그 파일 경로는 setup_logging() 이 남긴다
-
-    root = tk.Tk()
-    try:
-        ttk.Style().theme_use("vista")
-    except tk.TclError:
-        pass  # 테마가 없는 환경. 기본 테마로 진행한다.
-
-    # 세 창이 같은 방식으로 배율을 맞춘다 (`gui/common.py`).
-    apply_scaling(root)
-
-    ErpiaWindow(root)
-    root.mainloop()
-    return 0

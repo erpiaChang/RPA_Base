@@ -10,7 +10,7 @@
 `docs/CUSTOMERS.md`(**업체 전용 RPA 구조** 기획, 10-02) /
 `docs/customers/<업체>.md`(**업체 전용** 요구·미팅·결정, 10-02 — **그 업체 작업 때만 연다. 다른 작업에서는 열지도, 근거로 쓰지도 않는다.**
 `.ignore` 로 Grep 에서 빠지니 경로로 직접 연다).
-`docs/REQUIREMENTS.md` 는 **출발점(09-03)** 이라 지금과 다를 수 있다 — 필요할 때만 연다. 규칙은 이 파일이 최신이다 (사용자 확정 09-29).
+규칙은 이 파일이 최신이다 (사용자 확정 09-29). 출발점 `REQUIREMENTS.md`·`PROCESS.md` 는 10-06 에 지웠다 — 남은 규칙은 이 파일과 `CONTROLS.md` 로 옮겼다.
 
 `docs/later/` 는 **ERPia 작업에서는 열지도, 근거로 쓰지도 않는다** — 다른 프로그램을
 붙일 때 쓸 공용화 조사다(2026-09-17). 두 번째 프로그램 작업을 시작할 때만 연다.
@@ -66,10 +66,9 @@ RPA 3종과 서버 연동(스키마·보고·웹·원격 제어·사용법 질�
 
 | 목적 | 명령 |
 |---|---|
-| 런처 GUI | `run.bat` (또는 `.venv\Scripts\python.exe main.py`) |
-| 실행 파일 빌드 (기능별) | `build_collect.bat` / `build_erpia.bat` / `build_full.bat` (상세: `docs/BUILD.md`) |
-| **빌드 프로그램** (설정을 화면에서 고쳐서 굽는다, 기능 고정 선택) | `build_tool.bat` → `dist/run/RPA_1.exe` (`gui/build_app.py`, `docs/BUILD.md`) |
-| 실행용 빌드 (콘솔, 설정 파일 그대로) | `build_run.bat` → `dist/run/RPA_1.exe` |
+| 실행용 창 (개발 폴더에서) | `.venv\Scripts\python.exe main_run.py` — 뜨기만 해도 서버 확인이 나간다 (확인 도구는 `probe_guard.offline()`) |
+| **빌드** — 유일한 빌드 (설정을 화면에서 고쳐서 굽는다, 기능 고정 선택) | `build_tool.bat` → `dist/run/RPA_1.exe` (`gui/build_app.py`, `docs/BUILD.md`). 기능별 빌드·런처는 10-06 에 지웠다 |
+| 콘솔 빌드 (설정 그대로, 서버 등록 없이 지금 빌드 ID 로) | `.venv\Scripts\python.exe -m tools.build_run` → `dist/run/RPA_1.exe` |
 | 굽는 설정 만들기 (읽기 전용) | `.venv/Scripts/python.exe -m tools.bake_settings` |
 | 창 목록 조사 (읽기 전용) | `survey.bat` (또는 `.venv\Scripts\python.exe -m tools.survey_windows --save`) |
 | 수집 RPA 설정 점검 (읽기 전용) | `.venv\Scripts\python.exe -m tools.test_collect --check` |
@@ -215,6 +214,7 @@ VS Code에서 실행할 때도 인터프리터가 `.venv`인지 확인한다.
 
 상위 방법이 불가능한 이유를 확인하지 않고 하위 방법으로 내려가지 않는다.
 좌표로 내려간 항목은 `docs/UI_SURVEY.md`의 미해결 항목에 근거와 함께 남긴다.
+파일 선택 창은 폴더를 눌러 찾지 않고 **전체 경로를 파일명 칸에 넣는다** (`utils/filedialog.py`).
 
 ## 문자 읽기 우선순위
 
@@ -246,15 +246,13 @@ VS Code에서 실행할 때도 인터프리터가 `.venv`인지 확인한다.
 ## 구조
 
 ```
-main.py                       [개발] 런처 GUI → 기능 선택
-main_collect/erpia/full.py    배포 진입점 (기능별)
-main_run.py                   배포 진입점 (실행용 — 설정을 빌드에 굽는다)
+main_run.py                   배포 진입점 (실행용 — 설정을 빌드에 굽는다). 유일한 진입점
 main_build.py                 [개발] 빌드 프로그램 (설정을 고쳐서 실행용 exe 를 만든다)
-run.bat  run_admin.bat  survey.bat  probe_screen.bat  build_tool.bat  build_collect/erpia/full/run.bat  deploy_web.bat(웹 배포)  llm_worker.bat(LLM 워커)
+build_tool.bat(빌드)  deploy_web.bat(웹 배포)  llm_worker.bat(LLM 워커)  survey.bat  probe_screen.bat(조사)
 
 config/       설정. **좌표는 두지 않는다** (런타임에 rectangle() 로 계산)
               settings.py + fields_collect.py / fields_erpia.py
-gui/          launcher(개발) / build_app(개발, 빌드 프로그램) / collect_app / erpia_app / full_app / run_app / common /
+gui/          run_app(실행용 창) / erpia_app(그 부모 — 실행·예외 처리) / build_app(개발, 빌드 프로그램) / common /
               pipeline(진행 화면) / overlay(ERPia 위) / autorun_pane(예약) / history_window(지난 실행)
               run_app 은 erpia_app 을 상속한다. 입력 화면만 다시 그린다
 orchestrator/ 업무 흐름 묶음: collect_flow / erpia_flow / full_flow / common / modules(기능 선택) /

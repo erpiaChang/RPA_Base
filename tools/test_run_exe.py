@@ -2,7 +2,6 @@ r"""[조작 도구] **빌드본(exe)으로 전체 흐름을 완주시킨다.** �
 
     .venv\Scripts\python.exe -m tools.test_run_exe            실행용 빌드
     .venv\Scripts\python.exe -m tools.test_run_exe --show     띄우기만 한다
-    .venv\Scripts\python.exe -m tools.test_run_exe --build full   통합 빌드본 (기본은 run = 실행용)
 
 ## 왜 이 도구가 있나 (2026-09-17)
 
@@ -67,13 +66,12 @@ log = get_logger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# 빌드 산출물. 경로를 바꾸려면 `build_*.spec` 과 함께 본다.
+# 빌드 산출물. 경로를 바꾸려면 `build_run.spec` 과 함께 본다.
 BUILDS = {
     "run": PROJECT_ROOT / "dist" / "run" / "RPA_1.exe",
-    "full": PROJECT_ROOT / "dist" / "full" / "Integrated_RPA.exe",   # build_full.spec 의 name
 }
 
-WINDOW_TITLES = {"run": "주문 자동화", "full": "ERPia RPA"}
+WINDOW_TITLES = {"run": "주문 자동화"}
 RUN_BUTTON = "실행"
 
 WINDOW_TIMEOUT = 60.0        # 창이 뜨기를 기다리는 상한

@@ -436,8 +436,8 @@ def check_contract() -> list[bool]:
     out.append(check("워커 코드 — while True·time.sleep 없음 (프로젝트 규칙)",
                      "while True" not in code and "time.sleep" not in code))
     specs = [p for p in ROOT.glob("build_*.spec")]
-    out.append(check("★ 빌드 네 가지 모두 llm 을 금지 목록·검사 대상에 둔다",
-                     len(specs) == 4 and all('"llm",' in p.read_text(encoding="utf-8")
+    out.append(check("★ 빌드(build_run.spec 하나)가 llm 을 금지 목록·검사 대상에 둔다",
+                     len(specs) == 1 and all('"llm",' in p.read_text(encoding="utf-8")
                                              and '"tools", "llm")' in p.read_text(encoding="utf-8") for p in specs)))
     product = [p for d in ("gui", "automation", "collect", "orchestrator", "config", "utils")
                for p in (ROOT / d).rglob("*.py")] + list(ROOT.glob("main_*.py"))

@@ -174,7 +174,7 @@ dry-run 에서도 실제로 누른다. 예전에는 이동까지 건너뛰어 **
 ★ `Cancelled` 가 `BaseException` 인 이유: `Exception` 으로 두면 경로 곳곳의
 `except Exception` 이 취소를 삼켜서 **중단을 눌러도 루프가 계속 돈다.**
 그래서 받는 쪽은 반드시 `except cancel.Cancelled` 로 **명시해서** 잡아야 한다.
-지금 잡는 곳은 GUI 세 곳(`erpia_app` / `collect_app` 상속 포함)과
+지금 잡는 곳은 GUI(`erpia_app` — 실행용 창 `run_app` 이 상속)와
 `tools/test_flow.py` 다 (`tools/test_full.py` 는 중단 토큰 없이 돈다 — 잡을 것이 없다).
 새 진입점을 만들면 여기도 넣는다.
 

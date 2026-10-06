@@ -39,18 +39,19 @@
 ## RPA 3종 (사용자 확정 09-08)
 
 1과 2는 각각 단독으로 완결되고, 3은 둘을 잇는다. 연결은 **`manifest.json` 파일 계약**이다.
+**배포 진입점은 실행용 하나다** (10-06 — 기능별 진입점·창·빌드를 지웠다). 1~3 은 흐름(`orchestrator/*_flow.py`)과 개발 도구로만 남는다.
 
 | # | 흐름 | 진입점 |
 | --- | --- | --- |
-| 1 수집 | 메일 사이트 로그인 → 2차 인증(문자) → 대상 메일 선별 → 첨부 엑셀 저장 → 매니페스트 | `main_collect.py` / `tools/test_collect.py` |
-| 2 ERPia | 실행 → 로그인 → 주문매핑 → 주문수집(엑셀 폴더 → 자동) → 매출처리 → 물류대기 → 물류관리 | `main_erpia.py` / `tools/test_flow.py` |
-| 3 통합 | [수집] → 매니페스트의 엑셀을 사이트명 완전일치로 업로드(성공분만 `consumed_at`) → 이하 2와 같다 | `main_full.py` / `tools/test_full.py` |
+| 1 수집 | 메일 사이트 로그인 → 2차 인증(문자) → 대상 메일 선별 → 첨부 엑셀 저장 → 매니페스트 | `tools/test_collect.py` |
+| 2 ERPia | 실행 → 로그인 → 주문매핑 → 주문수집(엑셀 폴더 → 자동) → 매출처리 → 물류대기 → 물류관리 | `tools/test_flow.py` |
+| 3 통합 | [수집] → 매니페스트의 엑셀을 사이트명 완전일치로 업로드(성공분만 `consumed_at`) → 이하 2와 같다 | `tools/test_full.py` |
 | 실행용 | 통합과 같은 흐름 + **기능 선택**(09-21) + 설정을 빌드에 굽는다 + 자동 실행(예약) | `main_run.py` → `dist/run/RPA_1.exe` |
 
 - 엑셀수집(2)은 **폴더**를 받는다. 파일명 첫 밑줄 앞이 사이트명 (`사이트A_20260908.xlsx`)
 - 메일을 읽지 않음으로 되돌리지 않는다 (09-30, 코드 삭제). 받기 실패는 매니페스트 기록으로 다음 실행에서 다시 연다 (`webmail.retry_keys`)
 
-### 대상 업무 (화면 단위 상세는 `docs/PROCESS.md`)
+### 대상 업무 (화면 단위 상세는 `docs/CONTROLS.md`)
 
 ```
 로그인 → 주문매핑 진입
@@ -72,8 +73,6 @@
 
 | 파일 | 역할 |
 | --- | --- |
-| `main.py` | 진입점 → 런처 GUI (개발) |
-| `main_collect.py` / `main_erpia.py` / `main_full.py` | 기능별 배포 진입점 |
 | `main_run.py` | 실행용 배포 진입점. 설정을 빌드에 굽는다. **로그온 때 켜진 빌드본은 작업 스케줄러에 넘긴다** (09-29 — 5분 트리거가 떠 있는 것을 알게. 두 번 누름은 바로 뜬다) |
 | `main_build.py` | [개발] 빌드 프로그램 진입점 (`build_tool.bat`) |
 | `config/settings.py` | 설정 읽기의 **단일 지점** + `Timeouts` + 비밀 키 풀기 (재시도 상한은 자리마다 상수) |
@@ -114,14 +113,13 @@
 | `llm/guide.md` | 워커가 답할 때 넣는 **사용자용 설명서** — 화면 이름 기준, 내부 값 금지. 고치면 다음 질문부터 바뀐다 (9000자 이하, 늘리면 `--bench` 로 문맥 토큰을 본다) |
 | `utils/instance.py` | **한 벌만 뜬다** (09-28) — exe 경로로 이름 붙인 뮤텍스. 자동 켜기가 5분마다 띄워도 겹치지 않는다 |
 | `utils/autostart.py` | **자동 켜기** (09-28) — 로그온 때(`HKCU\...\Run`) + 5분마다 "안 떠 있으면 켜기"(작업 스케줄러 XML — 72시간 종료·배터리 조건 끔). `--background` 로 최소화 시작. 인자·작업 폴더·이름을 넘기면 LLM 워커도 같은 방식으로 건다 (`RPA_LLM_worker`). **09-29**: RPA 작업은 `--background --task`·우선순위 보통(5), `hand_over` — 로그온(Run)으로 켜진 것은 작업에 넘긴다 |
-| `gui/launcher.py` | 런처 (개발) |
-| `gui/collect_app.py` / `erpia_app.py` / `full_app.py` | 기능별 창 |
+| `gui/erpia_app.py` | 실행용 창의 **부모** — 실행·예외 처리·무인 경로. 혼자 띄우지 않는다 (10-06) |
 | `gui/run_app.py` | 실행용 창 (760×640, `erpia_app` 상속). **위쪽 탭 넷** — [홈] 상태 한 줄·큰 [실행]·실행할 기능·다음 예약·마지막 실행, [실행] 하면 같은 자리가 진행 화면 / [예약] / [실행 기록] 지난 실행 + 건너뛴 예약 / [설정] 기능별 묶음·**바꾸면 바로 저장**(사람이 친 것만, 바뀐 값만). **실행 중에는 홈에 고정**(다른 탭 disabled)·홈 아래 [일시정지]·[중단]. 입력 13가지(`docs/SETTINGS.md` "고정값은 로컬 설정이 못 덮는다" 절의 화면 항목 표). ERPia 경로는 켤 때와 [실행] 때 `_repair_paths` 가 찾아 맞추고(못 찾으면 `_fail_no_erpia`), 엑셀 저장 폴더는 기본값이 없어 비면 입력 필요 (10-02). **창이 뜰 때 서버 확인**(`_verify_build`) — 확인 중·거부면 [실행] 잠김. 안 고른 기능의 입력은 잠근다. 예약 회차는 그 줄의 기능으로. 기능 고정 빌드면 기능 체크가 잠긴다. **10-02**: 예약 5분 전 같은 아이디 ERPia 경고 창·[이번만 건너뛰기](`_warn_before_run`·`_skip_this`) / 메일 예약 30분 전 휴대폰 점검(`_precheck_before_run`, 홈 '다음 예약' 둘째 줄) / [멈춘 곳부터 다시](`on_resume`) / 맨 위 알림 창은 비모달 하나(`_show_notice`) |
 | `gui/build_app.py` | [개발] **빌드 프로그램** — 설정값을 절별로 보여 주고 고쳐서 저장·빌드. 기능 고정/실행 창 선택을 고른다 (09-22) |
 | `gui/common.py` / `pipeline.py` / `overlay.py` | GUI 공통 조각 / 진행 파이프라인(큰 단계가 있으면 큰 단계 동그라미 + 아래 세부 단계 줄, `place()` = `2/4`) / ERPia 위 오버레이([일시정지]/[계속하기] — 예전 [잠깐 멈춤]) |
 | `gui/history_window.py` | 지난 실행 표 — `HistoryPane`(실행 창 [실행 기록] 탭, 건너뛴 예약도 기록 파일에서, 10-02) / `HistoryWindow`(다른 창의 [지난 실행]). 줄을 두 번 누르면 그 리포트 (09-22) |
 | `gui/autorun_pane.py` | 자동 실행 설정(**예약 목록 — 반복·요일·시각·기능 골라 [추가]/[삭제]**) + 회차 기록 표(`history=False` 면 없음 — 실행 창). 예약 멈춤 단추는 웹과 같은 [일시정지]/[계속하기] (09-29) |
-| `build_*.spec` / `build_*.bat` / `build_tool.bat` | 기능별·실행용 빌드 / 빌드 프로그램. `tools` 는 빌드에서 뺀다 |
+| `build_run.spec` / `build_tool.bat` | 빌드 정의(유일) / 빌드 프로그램. `tools` 는 빌드에서 뺀다. 기능별 빌드(collect/erpia/full)는 10-06 에 지웠다 |
 | `server/schema.sql` / `server/README.md` | **서버(Supabase) 스키마 원본** — 표·RLS·`ingest`(PC 의 보고 창구. **빌드 ID + PC 바인딩** — 처음 보고한 PC 에 묶고 그 뒤로는 대조)·`register_build`(관리자, 빌드 프로그램이 부른다)·`revoke_device`·pg_cron(끊김 판정·180일 삭제·알림 메일 1분 — 끊김·무인 실행 결과·UAC·휴대폰, 업체 owner+관리자, 10-02) (09-28, `docs/SERVER_PLAN.md` D 절). 7절 원격 설정·명령, **8절 사용법 질문**(`questions`·`llm_workers`, `ask_question`·`llm_online`(웹) / `llm_take`·`llm_write`(워커 키) / `expire_questions` cron 1분, D-8), **9절 사용량**(`usage_daily` — `refresh_usage` cron 10분이 run_steps 에서 요금 기준 횟수를 센다, 지우지 않는다, D-9). 빌드와 무관 |
 | `web/index.html` / `app.js` / `config.js` / `_headers` / `wrangler.jsonc` / `README.md` + `deploy_web.bat` | **웹 대시보드** — 정적 한 장. **09-28 개편**: 위쪽 탭 넷(요약·사용량·PC·실행 기록, 주소 `#/...`) + 어디서나 여는 [사용법 질문] 옆 패널(입력칸 아래 고정·대화만 스크롤). **사용량** = `usage_daily`(요금 기준 사용 횟수, 관리자는 업체별·사용자는 자기 업체만 — RLS). 쓰기는 RPC 셋(`send_command`·`set_device_settings`·`ask_question`)뿐, 제어·설정은 admin·그 업체 owner 만. 진행 중인 실행 상세는 5초마다 다시 읽는다 (10-02). `textContent` 만, SRI, CSP. `deploy_web.bat`(wrangler@4). **SQL 9절을 먼저 적용하고 배포한다** |
 
@@ -174,10 +172,11 @@
 | `bake_settings.py` | 지금 설정을 빌드용으로 굽는다 (파일만 쓴다). 씨앗(`baked.key`)도 같이 — `.env` 에 `BAKED_SEED` 가 없으면 멈춘다. `missing()` — 빈 필수 값 (빌드 프로그램이 서버 등록 **전에** 부른다) |
 | `build_web.py` | 웹 배포 준비 — `.env` 값으로 `web/` 의 자리표시를 채워 `build/web/` 에 만든다 (`deploy_web.bat`, 10-02) |
 | `register_build.py` | **빌드를 서버에 등록해 빌드 ID 를 받는다** (09-28). 빌드 프로그램이 [저장하고 빌드] 때 부른다 — 관리자 계정으로 로그인 → `register_build` RPC → `bld_...` |
-| `build_run.py` | 실행용 빌드 한 번에 — 굽기 → 지난 산출물 삭제 → PyInstaller → 구운 파일 삭제. `build_run.bat` 과 빌드 프로그램이 쓴다 |
+| `build_run.py` | 실행용 빌드 한 번에 — 굽기 → 지난 산출물 삭제 → PyInstaller → 구운 파일 삭제. 빌드 프로그램이 쓴다. 콘솔로 바로 돌리면 서버 등록 없이 지금 빌드 ID 로 |
 
 지운 도구(주석·옛 문서에 이름이 남아 있다): 09-18 에 29개 — `docs/archive/HANDOFF_20260928.md` "09-18 — 개발 환경 정리" /
-09-29 에 `test_sales_menu.py` (선택주문 매출처리 결과 창 문구를 실기로 확인해 끝남).
+09-29 에 `test_sales_menu.py` (선택주문 매출처리 결과 창 문구를 실기로 확인해 끝남) /
+10-06 에 옛 판 정리 — 기능별 빌드(`build_collect/erpia/full`·`build_run.bat`)·진입점(`main.py`·`main_collect/erpia/full.py`)·런처(`gui/launcher.py`·`run.bat`·`run_admin.bat`)·기능별 창(`gui/collect_app.py`·`full_app.py`)·설정 샘플, 문서 `REQUIREMENTS.md`·`PROCESS.md`.
 
 ---
 
@@ -187,11 +186,9 @@
 docs/
   HANDOFF.md          ★ 지금 상태 / 열린 항목 / 함정 / 새 세션 프롬프트 — 이것부터
   PROGRESS.md         이 문서. 단계 표 / 제약 / 흐름 / 코드 지도
-  REQUIREMENTS.md     요구사항 (09-03). 출발점 — 자동으로 읽지 않는다. 달라진 곳은 ★ 지금 (09-29)
   SETTINGS.md         config/settings.local.json 설명서 ← 값 고치기 전 필독
   CONTROLS.md         화면별 컨트롤 식별표 (확정본) ← 구현 전 필독
   UI_SURVEY.md        초기 UI 조사 (09-03). 로그인·팝업·권한 문제
-  PROCESS.md          업무 프로세스 상세
   COLLECT_RPA.md      수집 RPA 확정사항·조사 결과
   ERROR_HANDLING.md   실패 시 동작 / 재시도 상한 / 재개 규칙
   BUILD.md            빌드

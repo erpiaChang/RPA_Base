@@ -2,8 +2,6 @@ r"""수집 흐름의 단계 표.
 
 수집은 **우리 데이터를 바꾸지 않는다.** 메일을 읽음으로 만들고 첨부를
 내려받는 것이 전부다. 그래서 재진입 정책이 ERPia 쪽보다 느슨하다.
-
-이 파일은 ERPia 전용 배포본에 들어가지 않는다 (`build_erpia.spec` 의 `FORBIDDEN`).
 """
 from __future__ import annotations
 

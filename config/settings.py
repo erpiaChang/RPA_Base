@@ -8,9 +8,8 @@ r"""전역 설정.
     config/fields_collect.py
     config/fields_erpia.py
 
-배포본에는 그 기능의 항목만 들어간다(`build_*.spec` 의 `FORBIDDEN`).
-빠진 기능의 파일은 아예 없으므로 그 항목도 함께 사라진다 — 설정 이름 자체가
-흔적이기 때문이다. 그래서 아래 import 는 **실패를 정상으로 취급한다.**
+아래 import 는 **실패를 정상으로 취급한다** — 기능별 빌드가 한 파일만 넣던 때(09-08~10-06)의 처리다.
+지금 빌드(`build_run.spec`)는 둘 다 넣는다.
 
 값이 확정되기 전에는 None 으로 둔다. 추측해서 채우지 않는다.
 각 항목의 뜻은 `docs/SETTINGS.md` 참고.

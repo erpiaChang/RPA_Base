@@ -27,7 +27,7 @@ model: sonnet
 
 ## 하지 않는 것
 
-- `tools.test_*`, `main*.py`, `build_*.bat`, `run.bat`, `survey.bat`, `tools.bake_settings` 실행
+- `tools.test_*`, `main*.py`, `build_*.bat`, `tools.build_run`, `survey.bat`, `tools.bake_settings` 실행
 - 위 표에 없는 `probe_*` 실행 (`probe_screen` 등 조사 도구는 실제 화면을 읽는다)
 - 명령 끝에 `APPROVED-RUN` 이나 `ALLOW-OUTSIDE` 를 붙이는 것. 사용자 승인을 받을 수 없다.
   훅에 막히면 그대로 멈추고 막혔다고 보고한다.

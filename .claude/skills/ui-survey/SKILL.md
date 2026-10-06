@@ -12,7 +12,7 @@ pywinauto 기반 Windows 자동화에서, **코드를 쓰기 전에 대상 화�
 
 ## 전제
 
-- 작업 규칙: `CLAUDE.md` (UI 조작·문자 읽기 우선순위). `docs/REQUIREMENTS.md` 는 출발점이라 필요할 때만
+- 작업 규칙: `CLAUDE.md` (UI 조작·문자 읽기 우선순위)
 - 조사 결과: **확정 식별값은 `docs/CONTROLS.md`**(화면별, 주력) / 판정 근거·좌표로 내려간 미해결은 `docs/UI_SURVEY.md`
 - 조사 코드는 **읽기 전용**이다. 값을 입력하거나 버튼을 누르지 않는다. 화면을 열거나 조회만 하는 것도 조작이다 —
   `tools/test_*` 로 만들고 승인(`APPROVED-RUN`)을 받는다.

@@ -357,7 +357,7 @@ def hold_detail(result: dict, dry_run: bool = False) -> str:
         # 저장 뒤 알림이 떴다 — '넘길 주문 없음' 으로 쓰면 확인할 것과 어긋난다 (09-22 검토)
         parts.append("저장 뒤 ERPia 알림이 떠 저장되지 않았을 수 있음")
     elif result.get("saved_exact"):
-        # 물류대기 [저장] = 보류 안 된 주문을 물류관리로 넘긴다 (PROCESS.md Phase 8→9).
+        # 물류대기 [저장] = 보류 안 된 주문을 물류관리로 넘긴다 (PROGRESS.md "대상 업무").
         parts.append(f"물류관리로 넘긴 주문 {saved}건" if saved else "물류관리로 넘길 주문 없음")
     else:
         # 화면 밖 행이 있어 보이는 행 차이는 건수가 아니다 (`save_general` 의 info).

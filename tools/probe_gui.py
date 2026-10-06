@@ -3,10 +3,9 @@ r"""[조사 도구 — 읽기 전용] 우리 GUI 창이 실제로 만들어지�
 대상 프로그램(ERPia)은 건드리지 않는다. **우리 tkinter 창만** 만들어 보고
 바로 닫는다. 업무 동작은 실행하지 않는다.
 
-    .venv\Scripts\python.exe -m tools.probe_gui              모든 창
-    .venv\Scripts\python.exe -m tools.probe_gui --only erpia 하나만
+    .venv\Scripts\python.exe -m tools.probe_gui              실행용 창 (10-06 부터 창은 이것 하나)
 
-왜 필요한가: 런처를 띄웠는데 **창이 하나도 나타나지 않은** 일이 있었다
+왜 필요한가: 옛 런처를 띄웠는데 **창이 하나도 나타나지 않은** 일이 있었다
 (2026-09-10). 프로세스는 살아 있어 "실행됐다"고 보이지만 화면에는 없다.
 어느 단계에서 막히는지 로그로 가르는 도구가 없어 만들었다.
 """
@@ -26,35 +25,10 @@ for _stream in (sys.stdout, sys.stderr):
         # 콘솔이 없는 환경. 출력 인코딩에만 영향이 있다.
         continue
 
-# 창을 실제로 띄우는 모듈들. 런처는 함수 하나라 따로 다룬다.
+# 창을 실제로 띄우는 모듈 (`run()` 이 있는 것). `gui.erpia_app` 은 실행용 창의 부모라 따로 띄우지 않는다.
 APPS = {
-    "collect": "gui.collect_app",
-    "erpia": "gui.erpia_app",
-    "full": "gui.full_app",
     "run": "gui.run_app",
 }
-
-
-def _probe_launcher() -> bool:
-    """런처와 **같은 순서로** 창을 만들어 어디까지 가는지 본다."""
-    import tkinter as tk
-
-    print("[launcher] 1) DPI 인식")
-    from utils.dpi import ensure_dpi_awareness
-
-    ensure_dpi_awareness()
-
-    print("[launcher] 2) tk.Tk()")
-    root = tk.Tk()
-    root.title("[조사] 런처")
-    root.geometry("360x200")
-
-    print("[launcher] 3) update()")
-    root.update()
-    print(f"[launcher] hwnd={root.winfo_id()} geometry={root.winfo_geometry()} "
-          f"state={root.state()} viewable={bool(root.winfo_viewable())}")
-    root.destroy()
-    return True
 
 
 def _probe_app(key: str, module_name: str) -> bool:
@@ -262,14 +236,11 @@ MIN_FLEXIBLE_PX = 220
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="GUI 창 생성 조사 (읽기 전용)")
-    parser.add_argument("--only", choices=("launcher", *APPS),
-                        help="이것만 확인한다")
+    parser.add_argument("--only", choices=tuple(APPS), help="이것만 확인한다")
     args = parser.parse_args()
 
-    targets: list[tuple[str, str | None]] = [("launcher", None)]
-    targets += [(key, module) for key, module in APPS.items()]
-    if args.only:
-        targets = [t for t in targets if t[0] == args.only]
+    targets = [(key, module) for key, module in APPS.items()
+               if not args.only or key == args.only]
 
     # 실행 창을 만들면 그것만으로 서버 확인이 나가고, 아직 안 묶인 빌드가 이 PC 에 묶인다 (09-28)
     from tools import probe_guard
@@ -277,15 +248,12 @@ def main() -> int:
         return _run(targets)
 
 
-def _run(targets: list[tuple[str, str | None]]) -> int:
+def _run(targets: list[tuple[str, str]]) -> int:
     failed = 0
     for key, module_name in targets:
         print(f"\n=== {key} ===")
         try:
-            if module_name is None:
-                _probe_launcher()
-            else:
-                _probe_app(key, module_name)
+            _probe_app(key, module_name)
         except Exception:
             failed += 1
             print(f"[{key}] ★ 실패")

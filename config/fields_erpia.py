@@ -1,6 +1,6 @@
 r"""업무 프로그램 자동화 기능의 설정 항목.
 
-기능별로 파일을 나눈다. 배포본에는 그 기능의 항목만 들어간다.
+기능별로 파일을 나눈다 (`config/settings.py` 가 합친다).
 값의 뜻은 `docs/SETTINGS.md` 에 있다.
 """
 from __future__ import annotations

@@ -1,7 +1,7 @@
 r"""Windows 파일 선택 Dialog 제어.
 
 폴더를 하나씩 클릭해서 찾지 않는다. **파일명 입력창에 전체 경로를 직접 넣고 연다.**
-(docs/REQUIREMENTS.md 6장)
+(CLAUDE.md "UI 조작 우선순위")
 
 표준 Windows Dialog(`#32770`) 다 — 확정값은 `docs/CONTROLS.md` "파일 선택 창" (09-08 실측).
 폴백을 여러 겹 두었고, 실패하면 무엇이 보였는지 로그에 남긴다.
@@ -274,7 +274,7 @@ def _find_open_button(dialog):
 def open_path(dialog, path: str, dry_run: bool = False) -> str:
     """파일명 입력창에 전체 경로를 넣고 연다. 사용한 방법을 돌려준다.
 
-    폴더를 하나씩 클릭하지 않는다 (docs/REQUIREMENTS.md 6장).
+    폴더를 하나씩 클릭하지 않는다 (CLAUDE.md "UI 조작 우선순위").
 
     **[열기] 는 눌렀는지를 창이 닫히는지로 확인한다.**
     Invoke 는 예외 없이 '성공'하면서 실제로는 아무 일도 안 하는 경우가 있다

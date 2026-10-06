@@ -2,7 +2,7 @@ r"""물류대기 관리 화면 (Phase 8).
 
 매출처리된 전표 중 **재고가 부족한 건에 배송보류를 걸고, 정상 건만 물류처리로 넘긴다.**
 
-근거: docs/PROCESS.md "Phase 8" + docs/CONTROLS.md "물류대기 관리 화면"
+근거: docs/CONTROLS.md "물류대기 관리 화면" (규칙은 그 안의 "물류대기 규칙")
 
     .venv\Scripts\python.exe -m automation.logistics_wait --dry-run
     .venv\Scripts\python.exe -m automation.logistics_wait

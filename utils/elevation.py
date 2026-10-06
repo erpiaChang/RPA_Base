@@ -32,7 +32,7 @@ class ElevationMismatch(RuntimeError):
             f"대상 프로그램(pid={pid})이 관리자 권한으로 실행 중인데\n"
             "RPA는 일반 권한으로 실행 중입니다. 이 상태로는 창을 찾을 수 없습니다.\n"
             "\n"
-            "해결: run_admin.bat 으로 RPA를 관리자 권한으로 다시 실행하세요.\n"
+            "해결: RPA를 관리자 권한으로 다시 실행하세요 (exe 우클릭 → 관리자 권한으로 실행).\n"
             "(또는 ERPia를 일반 권한으로 실행하거나, RPA가 직접 띄운 인스턴스만 사용)"
         )
 

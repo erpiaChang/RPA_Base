@@ -190,7 +190,7 @@ def _sms_values(label: str) -> tuple[str | None, str | None]:
 class RunWindow(ErpiaWindow):
     """입력을 줄인 실행 화면 (고칠 수 있는 값은 docs/SETTINGS.md 화면 항목 표). 흐름은 통합과 같다."""
 
-    # 흐름이 통합과 같으므로 구간 실행도 같이 지원하지 않는다 (`gui/full_app.py`).
+    # 흐름이 통합과 같아 구간 실행은 지원하지 않는다 — 대신 [멈춘 곳부터 다시] (개발은 `tools/test_flow --from`).
     SUPPORTS_SEGMENT = False
 
     def __init__(self, root: tk.Tk) -> None:

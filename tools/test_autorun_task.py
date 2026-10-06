@@ -80,7 +80,7 @@ def register(exe: Path) -> int:
     """로그인할 때 이 exe 를 띄우도록 등록한다. **시스템을 바꾼다.**"""
     if not exe.is_file():
         log.error("실행 파일이 없다: %s", exe)
-        log.error("빌드부터 한다: build_run.bat")
+        log.error("빌드부터 한다: build_tool.bat")
         return 1
     if exe.suffix.lower() != ".exe":
         log.error("exe 가 아니다: %s. 배포본을 지정한다.", exe)

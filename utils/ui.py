@@ -936,7 +936,7 @@ def scroll_grid(grid, direction: str, anchor=None, how: str = "ScrollPattern") -
     수단이 하나면 그것이 막혔을 때 방법이 없다. 우선순위 순으로 둔다.
       1) UIA ScrollPattern  — 컨트롤이 스스로 스크롤한다
       2) 키보드            — 우측은 End, 아래는 PageDown
-    좌표는 쓰지 않는다. (docs/REQUIREMENTS.md 4장)
+    좌표는 쓰지 않는다. (CLAUDE.md "UI 조작 우선순위")
     """
     if direction == "top":
         # ScrollPattern 에는 "맨 위" 개념이 없다. 키보드로만 한다.
@@ -1043,7 +1043,7 @@ def cell_value(ctrl) -> str:
     DataItem의 Name은 값이 아니라 '<컬럼명> 행 N' 이라는 식별자다.
     값은 별도 패턴으로 읽어야 한다.
 
-    순서 (docs/REQUIREMENTS.md 7장 - UI Automation 우선):
+    순서 (CLAUDE.md "문자 읽기 우선순위" - UI Automation 우선):
       1) Value Pattern
       2) LegacyIAccessible Value
       3) 하위 Text control 들의 텍스트
