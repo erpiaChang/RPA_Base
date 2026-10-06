@@ -203,7 +203,7 @@ docs/
                       사용량 + D-10 규칙(ingest 순서·권한·RLS·웹·cron). 만들기 전 기획은 archive
   local/              [git 밖] 사이트 전용 조사 기록 (10-02 — 메일 사이트 코드는 collect/sites/local, 시험은 tools/local)
   customers/          [git 밖] 업체 전용 요구·미팅·결정 (10-02, 원칙은 CLAUDE.md). 그 업체 작업 때만 연다 — .ignore 로 Grep 제외
-                      첫 업체 파일 하나 (미팅 1회 요약, 프로세스 미확정. 회의 원문은 요약 뒤 지움)
+                      첫 업체 파일 하나 (회의 2회·시연 영상 요약, 실화면 확인 전. 원문은 요약 뒤 지움)
   archive/            끝난 기록. 자동으로 읽히지 않는다. 색인은 HANDOFF 6절
                       HANDOFF_20260929(09-28~09-29) / HANDOFF_20260928(09-17~09-28) / HANDOFF_20260917(09-15~09-17) /
                       SERVER_PLAN_ABC_20260929(서버 기획 A·B·C) / DASHBOARD_BRIEF_20260921(오버레이 자문) /
