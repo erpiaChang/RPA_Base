@@ -196,6 +196,7 @@ docs/
   BILLING.md          ★ 기능 선택(모듈화)·과금·트래픽 설계 — 확정 사항 (09-21, 과금 = 접속 사이트 수 09-30)
   SITES.md            다른 웹 사이트 추가 — Site/Task 계약·설정 경계·절차·체크리스트 (09-30). 스킬 site-add
   CUSTOMERS.md        업체 전용 RPA 구조 — 업체 파일 + 끼움 자리 + 빌드에 그 업체만 (10-02 기획, 프로세스 확정 뒤 만든다)
+  WATCH.md            시간대 반복 조회 — 실행 한 번 안에서 N분마다 조회·저장 (10-06 기획, 만들기 전)
   SERVER_PLAN.md      서버 연동·웹 대시보드 — 지금 구조(D): RPA 와 서버의 역할·경계·원격·사용법 질문·
                       사용량 + D-10 규칙(ingest 순서·권한·RLS·웹·cron). 만들기 전 기획은 archive
   local/              [git 밖] 사이트 전용 조사 기록 (10-02 — 메일 사이트 코드는 collect/sites/local, 시험은 tools/local)

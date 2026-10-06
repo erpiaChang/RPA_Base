@@ -7,7 +7,7 @@
 `docs/HANDOFF.md`(지금 상태·열린 항목·함정) / `docs/CONTROLS.md`(컨트롤 식별표) /
 `docs/UI_SURVEY.md`(초기 조사·좌표로 내려간 미해결) / `docs/BUILD.md`(빌드) / `docs/archive/`(끝난 기록) /
 `docs/SITES.md`(**다른 웹 사이트 추가** — 규칙·계약·절차. 스킬 `site-add` 가 연다, 09-30) /
-`docs/CUSTOMERS.md`(**업체 전용 RPA 구조** 기획, 10-02) /
+`docs/CUSTOMERS.md`(**업체 전용 RPA 구조** 기획, 10-02) / `docs/WATCH.md`(**시간대 반복 조회** 기획, 10-06) /
 `docs/customers/<업체>.md`(**업체 전용** 요구·미팅·결정, 10-02 — **그 업체 작업 때만 연다. 다른 작업에서는 열지도, 근거로 쓰지도 않는다.**
 `.ignore` 로 Grep 에서 빠지니 경로로 직접 연다).
 규칙은 이 파일이 최신이다 (사용자 확정 09-29). 출발점 `REQUIREMENTS.md`·`PROCESS.md` 는 10-06 에 지웠다 — 남은 규칙은 이 파일과 `CONTROLS.md` 로 옮겼다.
