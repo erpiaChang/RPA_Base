@@ -72,6 +72,11 @@ Window: `auto_id="Main"`, title `<업체코드> - <아이디>` (예: `comp01 - u
 | 화면 탭 컨트롤 | Tab | `Tab` | 확정 |
 | 즐겨찾기 / 모두넣기 / 모두닫기 | Button | `btn_BookMarkShortCut` / `btn_InnerFormShortCut` / `btn_CloseAllMenu` | 확정 |
 
+**메뉴 검색으로 화면 열기** (2026-10-06 실기, 업체 전용 화면 둘): `sch_Menus` 를 `click_input()` → `type_keys("<정확한 메뉴명>", with_spaces=True)`
+(바꿀 때는 먼저 `^a{BACKSPACE}`). 결과는 따로 뜨는 목록이 아니라 **`acd_Nav` 의 트리가 걸러져** 대분류 아래 그 항목만 남는다 —
+`TreeItem`(auto_id 없음, `window_text()` = 메뉴명, 보이는 것)을 `click_input()` 하면 같은 이름의 화면 탭(`TabItem`)이 생긴다.
+`sch_Menus` 안의 Edit·`ListBox` 는 auto_id 가 숫자(실행마다 다를 수 있다)거나 크기 0 이라 쓰지 않는다. Value Pattern 입력으로 걸러지는지는 미확인.
+
 ★ **`auto_id="Tab"` 을 화면 탭으로 착각하지 않는다.** 이름이 그렇게 보이지만
 주문매핑 화면 **안쪽의 탭**이다. 열린 업무 화면을 고르는 탭이 아니다.
 
