@@ -73,88 +73,82 @@ def check_keys() -> list[bool]:
 
 
 def check_values() -> list[bool]:
-    log.info("▶ 올릴 값 — 순서 맞추기·서버가 안 받을 값 거르기·적용한 판 기록 (09-28 검토)")
-    server = FakeServer()
-    r = _remote(server)
-    r.push({"collect_sources": ["site", "excel"], "logistics_mode": "", "auto_run_interval_minutes": 5,
-            "hold_exclude_codes": ["x" * 51], "delivery_box": "박스B"})
-    r.poll_once()
-    pushed = server.sent[0].get("pushed")
-    r.applied(9)
-    return [check("★ 서버가 안 받을 값은 PC 에서 거른다 (요청째 400 이 나지 않게)",
-                  pushed == {"collect_sources": ["excel", "site"], "delivery_box": "박스B"}, str(pushed)),
+    log.info("▶ 실을 값 — 순서 맞추기·서버가 안 받을 값 거르기 (09-28 검토)")
+    picked = remote.sendable({"collect_sources": ["site", "excel"], "logistics_mode": "", "auto_run_interval_minutes": 5,
+                              "hold_exclude_codes": ["x" * 51], "delivery_box": "박스B", "login_password": "x"})
+    return [check("★ 서버가 안 받을 값·원격 키가 아닌 값(비밀번호)은 PC 에서 거른다 (답째 버려지지 않게)",
+                  picked == {"collect_sources": ["excel", "site"], "delivery_box": "박스B"}, str(picked)),
             check("수집방식은 순서를 맞춘다 (웹·PC 순서가 달라 매번 '바뀜' 이었다)",
                   remote.normalize("collect_sources", ["site", "excel"]) == ["excel", "site"]
                   and remote.normalize("run_modules", ["logistics", "mail"]) == ["mail", "logistics"]),
-            check("★ 적용한 판을 기록하고, 다시 켜면 그 판에서 이어간다",
-                  _remote(FakeServer()).version == 9)]
+            check("★ 서버 설정 판·판 기록 파일·올리기가 없다 — 설정은 PC 에만 (10-07)",
+                  not hasattr(remote, "STATE_PATH") and not hasattr(remote.Remote, "push")
+                  and not hasattr(remote.Remote, "applied"))]
 
 
-def check_poll() -> list[bool]:
-    log.info("▶ poll — 보내는 것·받는 것")
-    out = []
-    server = FakeServer((200, {"version": 3, "settings": {"delivery_box": "박스B", "login_password": "새어나감"},
-                               "commands": [{"id": 7, "kind": "start", "modules": ["orders"]},
-                                            {"id": 8, "kind": "shutdown", "modules": []}]}))
-    r = _remote(server)
-    r.push({"delivery_box": "박스A", "login_password": "x"})
-    r.poll_once()
-    sent = server.sent[0]
-    out.append(check("첫 요청 — 빌드 ID·PC·판 0·고정 기능(빈 목록)",
-                     sent["device_key"] == "bld_x" and sent["machine"] == "machine-guid"
-                     and sent["known_version"] == 0 and sent["locked_modules"] == [], str(sent)))
-    out.append(check("★ 올리는 설정에 비밀번호가 실리지 않는다", sent.get("pushed") == {"delivery_box": "박스A"},
-                     str(sent.get("pushed"))))
+def _drain(r) -> list:
     events = []
     while not r.inbox.empty():
         events.append(r.inbox.get_nowait())
-    settings = [e for e in events if e[0] == remote.SETTINGS_EVENT]
-    commands = [e for e in events if e[0] == remote.COMMAND_EVENT]
-    out.append(check("★ 받은 설정은 원격 키만 (서버가 비밀을 보내도 버린다)",
-                     settings == [(remote.SETTINGS_EVENT, {"delivery_box": "박스B"}, 3)], str(settings)))
+    return events
+
+
+def check_poll() -> list[bool]:
+    log.info("▶ poll — 보내는 것·받는 것 (설정은 서버에 두지 않는다, 10-07)")
+    out = []
+    server = FakeServer((200, {"commands": [
+        {"id": 7, "kind": "start", "modules": ["orders"]},
+        {"id": 8, "kind": "shutdown", "modules": []},
+        {"id": 9, "kind": "read_settings", "modules": []},
+        {"id": 10, "kind": "settings", "modules": [], "settings": {"delivery_box": "박스B", "login_password": "새어나감"}}]}))
+    r = _remote(server)
+    r.poll_once()
+    sent = server.sent[0]
+    out.append(check("★ 요청에는 빌드 ID·PC 뿐 — 설정을 싣지 않는다",
+                     sent == {"device_key": "bld_x", "machine": "machine-guid"}, str(sent)))
+    events = _drain(r)
+    out.append(check("★ 웹이 바꾼 값은 원격 키만 넘긴다 (서버가 비밀을 보내도 버린다)",
+                     (remote.SETTINGS_EVENT, 10, {"delivery_box": "박스B"}) in events, str(events)))
+    out.append(check("설정 보기 요청을 넘긴다", (remote.READ_EVENT, 9) in events, str(events)))
     out.append(check("모르는 명령은 버리고 아는 것만 넘긴다",
-                     commands == [(remote.COMMAND_EVENT, 7, "start", ["orders"])], str(commands)))
-    out.append(check("판을 기억한다", r.version == 3))
+                     [e for e in events if e[0] == remote.COMMAND_EVENT] == [(remote.COMMAND_EVENT, 7, "start", ["orders"])],
+                     str(events)))
 
     r.done(7, "시작함")
-    server.replies = [(200, {"version": 3, "commands": []})]
+    r.reply_settings(9, {"delivery_box": "박스A", "login_password": "x", "target_exe": "C:/x.exe", "logistics_mode": ""})
     r.poll_once()
-    out.append(check("결과를 다음 요청에 싣고, 올린 설정은 비운다",
-                     server.sent[1].get("results") == [{"id": 7, "result": "시작함"}]
-                     and "pushed" not in server.sent[1] and server.sent[1]["known_version"] == 3,
+    out.append(check("★ 설정 답에는 원격 키만 — 비밀번호·경로·빈 값이 실리지 않는다",
+                     server.sent[1].get("results") == [
+                         {"id": 7, "result": "시작함"},
+                         {"id": 9, "result": "보냄", "settings": {"delivery_box": "박스A"}, "locked_modules": None}],
                      str(server.sent[1])))
-    server.replies = [(200, {"version": 3, "commands": []})]
     r.poll_once()
     out.append(check("보낸 결과는 다시 보내지 않는다", "results" not in server.sent[2]))
-    out.append(check("같은 판이면 설정 이벤트가 없다", r.inbox.empty()))
 
-    r.push({"delivery_box": "박스C"})
+    r.done(12, "끝")
     server.replies = [OSError("연결 끊김")]
     r.poll_once()
-    server.replies = [(200, {"version": 3, "commands": []})]
     r.poll_once()
-    out.append(check("네트워크가 끊겨도 올릴 설정은 남았다가 다음에 간다",
-                     server.sent[-1].get("pushed") == {"delivery_box": "박스C"}))
+    out.append(check("네트워크가 끊겨도 결과는 남았다가 다음에 간다",
+                     server.sent[-1].get("results") == [{"id": 12, "result": "끝"}]))
 
-    r.push({"auto_run_times": ("평일 09:00",)})
+    r.done(13, "x")
     server.replies = [(400, {"message": "bad request"})]
     r.poll_once()
-    server.replies = [(200, {"version": 3, "commands": []})]
     r.poll_once()
-    out.append(check("400 이면 그 설정을 또 보내지 않는다 (명령은 계속 받는다)",
-                     "pushed" not in server.sent[-1] and not r.unauthorized))
+    out.append(check("400 이면 그 결과를 또 보내지 않는다 (명령은 계속 받는다)",
+                     "results" not in server.sent[-1] and not r.unauthorized))
 
     server.replies = [(401, {"message": "unauthorized"})]
     r.poll_once()
-    out.append(check("★ 401 이면 멈춘다 (다른 PC·폐기)", r.unauthorized))
+    out.append(check("★ 401 이면 멈춘다 (다른 PC·폐기·업체 중지)", r.unauthorized))
 
     locked = _remote(FakeServer(), locked=["logistics"])
-    locked.push({"run_modules": ["orders"], "delivery_box": "박스B"})
+    locked.reply_settings(1, {"run_modules": ["logistics"], "delivery_box": "박스B"})
     locked.poll_once()
-    sent = locked._post.sent[0]
-    out.append(check("기능 고정 빌드 — 기능은 올리지 않고 고정 기능을 알린다",
-                     sent.get("pushed") == {"delivery_box": "박스B"} and sent["locked_modules"] == ["logistics"],
-                     str(sent)))
+    reply = locked._post.sent[0]["results"][0]
+    out.append(check("기능 고정 빌드 — 설정 답에 고정 기능을 싣는다 (웹이 기능 칸을 잠근다)",
+                     reply["locked_modules"] == ["logistics"], str(reply)))
     from utils.wait import WaitTimeout, wait_for
 
     live = FakeServer()
@@ -179,20 +173,23 @@ def check_poll() -> list[bool]:
 
 
 class FakeRemote:
+    """창이 부르는 것만 — 올리기(push)가 없으니 창이 부르면 AttributeError 로 드러난다."""
+
     def __init__(self):
         self.inbox: queue.Queue = queue.Queue()
         self.results: list[tuple[int, str]] = []
-        self.pushed: list[dict] = []
+        self.replies: list[tuple[int, dict]] = []
         self.unauthorized = False
+        self.closed = False
 
     def done(self, command_id, result):
         self.results.append((command_id, result))
 
-    def push(self, values):
-        self.pushed.append(dict(values))
+    def reply_settings(self, command_id, values):
+        self.replies.append((command_id, dict(values)))
 
-    def applied(self, version):
-        self.applied_version = version
+    def close(self):
+        self.closed = True
 
 
 def check_window() -> list[bool]:
@@ -225,18 +222,21 @@ def check_window() -> list[bool]:
                                           "auto_run_times": [], "auto_run_interval_minutes": 60})
             window.attach_autorun(off)
             fake = window.remote = FakeRemote()
-            window._remote_seen = remote.snapshot(SETTINGS)     # `_start_remote` 가 하는 준비
 
-            # 서버 판은 원격 키를 다 가진다 — 빠진 키는 PC 가 채워 올린다 (10-01, 아래 따로 본다)
-            web = {**remote.snapshot(SETTINGS),
-                   "delivery_box": "박스B", "delivery_company": "웹택배", "logistics_mode": "수동",
+            # 웹은 바꾼 키만 보낸다 (10-07 — 서버에 판이 없다)
+            web = {"delivery_box": "박스B", "delivery_company": "웹택배", "logistics_mode": "수동",
                    "hold_exclude_codes": ["111", "222"], "auto_run_enabled": False,
                    "auto_run_times": ["평일 09:00"], "run_modules": ["orders", "logistics"]}
-            fake.inbox.put((remote.SETTINGS_EVENT, web, 5))
+            fake.inbox.put((remote.SETTINGS_EVENT, 5, web))
             window.busy = True
             window._drain_remote()
             out.append(check("★ 실행 중에는 웹 설정을 미룬다 (도는 회차 값을 바꾸지 않는다)",
-                             window.box_var.get() != "박스B" and window._pending_remote is not None))
+                             window.box_var.get() != "박스B" and window._pending_remote is not None
+                             and fake.results[-1] == (5, "실행 중이라 끝난 뒤 적용한다"), str(fake.results[-1:])))
+            fake.inbox.put((remote.READ_EVENT, 6))
+            window._drain_remote()
+            out.append(check("실행 중 설정 보기는 끝난 뒤 적용할 웹 값까지 답한다",
+                             fake.replies and fake.replies[-1][1].get("delivery_box") == "박스B", str(fake.replies[-1:])))
             window.busy = False
             window._drain_remote()
             saved = json.loads(temp.read_text(encoding="utf-8")) if temp.exists() else {}
@@ -249,43 +249,46 @@ def check_window() -> list[bool]:
                              window._checked_modules() == ["orders", "logistics"]
                              and window.autorun_pane.slots == ["평일 09:00"],
                              f"{window._checked_modules()} / {window.autorun_pane.slots}"))
-            out.append(check("★ 받은 값을 서버로 되돌려 올리지 않는다", fake.pushed == [], str(fake.pushed)))
-            out.append(check("적용한 뒤 그 판을 기록한다", getattr(fake, "applied_version", None) == 5))
-            # 새로 생긴 설정(10-01 매출처리 방식)이 서버 판에 없으면 PC 값으로 채워 올린다
-            fake.inbox.put((remote.SETTINGS_EVENT, {k: v for k, v in web.items() if k != "sales_mode"}, 6))
-            window._drain_remote()
-            out.append(check("★ 서버 판에 빠진 키(매출처리 방식)는 PC 값으로 채워 올린다",
-                             fake.pushed == [{"sales_mode": SETTINGS.sales_mode}], str(fake.pushed)))
-            fake.pushed.clear()
-            fake.inbox.put((remote.SETTINGS_EVENT, {**web, "sales_mode": "선택주문"}, 7))
+            fake.inbox.put((remote.SETTINGS_EVENT, 7, {"sales_mode": "선택주문"}))
             window._drain_remote()
             out.append(check("★ 웹에서 바꾼 매출처리 방식이 화면 라디오에 옮겨진다 (안 옮기면 다음 저장이 되돌린다)",
                              window.sales_var.get() == "선택주문" and SETTINGS.sales_mode == "선택주문"
-                             and fake.pushed == [], f"{window.sales_var.get()} / {fake.pushed}"))
+                             and fake.results[-1] == (7, "적용함 — 1개 바뀜"),
+                             f"{window.sales_var.get()} / {fake.results[-1:]}"))
+            fake.inbox.put((remote.SETTINGS_EVENT, 8, {"sales_mode": "선택주문"}))
+            window._drain_remote()
+            out.append(check("같은 값이면 바뀐 것이 없다고 답한다", fake.results[-1] == (8, "바뀐 것이 없다"),
+                             str(fake.results[-1:])))
+            window.locked_modules = ["orders"]
+            fake.inbox.put((remote.SETTINGS_EVENT, 9, {"run_modules": ["mail"]}))
+            window._drain_remote()
+            out.append(check("기능 고정 빌드는 웹의 기능 바꾸기를 버린다 (서버는 빌드 구성을 모른다)",
+                             "mail" not in (SETTINGS.run_modules or []) and fake.results[-1] == (9, "바뀐 것이 없다"),
+                             str(fake.results[-1:])))
+            window.locked_modules = None
+            fake.inbox.put((remote.READ_EVENT, 10))
+            window._drain_remote()
+            reply = fake.replies[-1]
+            out.append(check("★ 설정 보기 — 지금 값을 원격 키만 답한다 (비밀번호·경로 없음)",
+                             reply[0] == 10 and reply[1].get("sales_mode") == "선택주문"
+                             and set(reply[1]) == set(remote.REMOTE_KEYS), str(sorted(reply[1]))))
             SETTINGS.sales_mode = "전체"
             window.sales_var.set("전체")
-            window._remote_seen = remote.snapshot(SETTINGS)      # 되돌린 것을 'PC 에서 고침' 으로 보지 않게
-            window.box_var.set("박스C")
-            SETTINGS.delivery_box = "박스C"
-            window._push_remote()
-            out.append(check("PC 에서 고친 것만 올린다", fake.pushed == [{"delivery_box": "박스C"}], str(fake.pushed)))
 
             # 바로 저장 (09-29) — 사람이 친 것(키·체크·고르기)만 저장을 부른다. 코드가 칸을 바꾼 것은 아니다
             out.append(check("웹 설정을 칸에 옮겨도 저장을 예약하지 않는다", window._save_job is None))
             bound = str(window.courier_entry.bind("<KeyRelease>"))
-            fake.pushed.clear()
             window.courier_var.set("손택배")
             window._schedule_save()
             scheduled = window._save_job is not None
             window._cancel_save()
             window._autosave()                                  # 0.8초 기다리는 대신 곧바로
             saved = json.loads(temp.read_text(encoding="utf-8"))
-            out.append(check("★ 설정 칸에 치면 바로 저장하고 서버에도 올린다 (09-29)",
+            out.append(check("★ 설정 칸에 치면 바로 저장한다 — PC 설정 파일에만, 서버에는 올리지 않는다 (09-29 / 10-07)",
                              "_schedule_save" in bound and scheduled
                              and saved.get("delivery_company") == "손택배"
-                             and fake.pushed == [{"delivery_company": "손택배"}]
                              and "저장했습니다" in window.saved_var.get(),
-                             f"{saved.get('delivery_company')} / {fake.pushed} / {window.saved_var.get()}"))
+                             f"{saved.get('delivery_company')} / {window.saved_var.get()}"))
             window.busy = True
             window._schedule_save()
             out.append(check("실행 중에는 저장하지 않는다 (칸이 잠겨 있고 [실행] 이 이미 저장했다)",
@@ -381,8 +384,23 @@ def check_window() -> list[bool]:
             run_app.process.screen_locked = lambda: True
             out.append(check("화면이 잠겼으면 시작하지 않는다", "잠겨" in command(remote.START)))
             fake.unauthorized = True
-            window._lock_if_unauthorized()
-            out.append(check("원격이 401 을 받으면 [실행] 을 잠근다", window.verify_state == "blocked"))
+            scheduled: list = []
+            keep_after = window.root.after
+            window.root.after = lambda ms, fn=None, *args: scheduled.append((ms, fn)) or "job"
+            try:
+                window._lock_if_unauthorized()
+                out.append(check("원격이 401 을 받으면 [실행] 을 잠근다", window.verify_state == "blocked"))
+                out.append(check("★ 잠근 뒤에도 10분마다 서버 확인을 다시 한다 (업체 중지를 풀면 껐다 켜지 않아도 돈다)",
+                                 (run_app.VERIFY_BLOCKED_MS, window._verify_build) in scheduled, str(scheduled)))
+                reporter = type("R", (), {"unauthorized": True, "close": lambda self: None})()
+                window._reporter_obj = reporter
+                window._verify_result = (run_app.telemetry.VERIFY_OK, "")
+                window._poll_verify()
+                out.append(check("★ 다시 확인을 통과하면 잠금을 풀고 원격을 새로 만든다",
+                                 window.verify_state == "" and not reporter.unauthorized and fake.closed
+                                 and window.remote is not fake, f"{window.verify_state!r} / 닫힘 {fake.closed}"))
+            finally:
+                window.root.after = keep_after
     finally:
         run_app.process.screen_locked = keep_locked
         config_settings.LOCAL_SETTINGS_PATH = keep_path
@@ -460,16 +478,13 @@ def main() -> int:
     setup_logging()
     from utils import autorun
 
-    keep_state, keep_paused = remote.STATE_PATH, autorun.STATE_PATH
-    temp = Path(tempfile.mkdtemp())
-    remote.STATE_PATH = temp / "remote_state.json"      # 개발 PC 의 기록을 건드리지 않는다
-    autorun.STATE_PATH = temp / "autorun_state.json"    # 웹 [일시정지]·[계속하기] 가 남긴다 (10-01)
+    keep_paused = autorun.STATE_PATH
+    autorun.STATE_PATH = Path(tempfile.mkdtemp()) / "autorun_state.json"    # 웹 [일시정지]·[계속하기] 가 남긴다 (10-01)
     try:
-        # check_values 는 판을 기록한다 — poll 확인(판 0 에서 시작)보다 뒤에 둔다
         results = (check_keys() + check_poll() + check_values() + check_window() + check_settings_file()
                    + check_autostart())
     finally:
-        remote.STATE_PATH, autorun.STATE_PATH = keep_state, keep_paused
+        autorun.STATE_PATH = keep_paused
     log.info("결과: 통과 %d / 실패 %d", sum(results), len(results) - sum(results))
     return 0 if all(results) else 1
 

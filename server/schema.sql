@@ -33,7 +33,7 @@ create table if not exists public.accounts (
     created_at  timestamptz not null default now()
 );
 -- 업체 단위 중지 (10-07): 값이 있으면 그 업체의 모든 빌드가 ingest·poll 에서 401 (private.bind_device), owner 의 웹 제어 403
--- (private.can_control). 읽기는 그대로. 중지·재개는 public.suspend_account / resume_account (SQL 로만). 자료는 지우지 않는다
+-- (private.can_control). 읽기는 그대로. 중지·재개는 public.suspend_account / resume_account (웹 관리자·SQL). 자료는 지우지 않는다
 alter table public.accounts add column if not exists suspended_at timestamptz;
 
 create table if not exists public.devices (
@@ -554,7 +554,7 @@ $$;
 revoke execute on function public.revoke_device(uuid) from public, anon, authenticated;
 
 -- 업체 중지·재개 (10-07). 중지하면 그 업체의 모든 빌드가 401 이고 실행 창이 잠긴다 — PC 마다 폐기하지 않아도 된다.
--- 자료·빌드는 그대로라 재개하면 다시 돈다. 부르는 화면이 없어 SQL 로만 (revoke_device 와 같은 꼴)
+-- 자료·빌드는 그대로라 재개하면 다시 돈다 (PC 는 10분마다 다시 확인한다). 웹 관리자 화면(PC 탭)과 SQL 이 부른다
 create or replace function public.suspend_account(account uuid) returns void
 language plpgsql security definer set search_path = '' as $$
 begin
@@ -567,7 +567,8 @@ begin
     end if;
 end;
 $$;
-revoke execute on function public.suspend_account(uuid) from public, anon, authenticated;
+revoke execute on function public.suspend_account(uuid) from public, anon;
+grant execute on function public.suspend_account(uuid) to authenticated;   -- 안에서 is_admin 검사
 
 create or replace function public.resume_account(account uuid) returns void
 language plpgsql security definer set search_path = '' as $$
@@ -581,7 +582,8 @@ begin
     end if;
 end;
 $$;
-revoke execute on function public.resume_account(uuid) from public, anon, authenticated;
+revoke execute on function public.resume_account(uuid) from public, anon;
+grant execute on function public.resume_account(uuid) to authenticated;   -- 안에서 is_admin 검사
 -- ---------------------------------------------------------------------------------------------
 -- 6. 정리 잡 (pg_cron, **UTC**) — 끊김 판정 5분 / 180일 삭제 하루(18:30 UTC = 03:30 KST) / 알림 메일 1분
 -- ---------------------------------------------------------------------------------------------
@@ -598,6 +600,11 @@ begin
     select id, 'lost', account_id, device_id from lost
     on conflict do nothing;
     get diagnostics v_n = row_count;
+    -- 설정 값은 서버에 남기지 않는다 (7절, 10-07) — 안 읽힌 PC 의 답·안 가져간 웹 값. 첫 실행에 표가 없어도 깨지지 않게
+    if to_regclass('public.commands') is not null then
+        update public.commands set payload = null
+        where payload is not null and (done_at < now() - interval '2 minutes' or expires_at < now());
+    end if;
     return v_n;
 end;
 $$;
@@ -771,26 +778,24 @@ select cron.schedule('rpa_purge_old',   '30 18 * * *', $$select public.purge_old
 select cron.schedule('rpa_send_alerts', '* * * * *', $$select public.send_alerts()$$);
 
 -- ---------------------------------------------------------------------------------------------
--- 7. 원격 설정·명령 (09-28, 사용자 요청) — 웹에서 PC 의 설정을 바꾸고, 실행·중단·예약 멈춤/재개를 시킨다.
+-- 7. 원격 설정·명령 (09-28, 10-07 개편) — 웹에서 PC 의 설정을 보고 바꾸고, 실행·중단·예약 멈춤/재개를 시킨다.
 --    서버는 PC 를 부르지 않는다. RPA 가 30초마다 `poll` 로 가져간다 (연결 방향은 그대로 RPA → 서버).
---    비밀번호는 여기 오지 않는다 — `private.clean_settings` 가 허용한 키만 받는다 (사용자 확정 09-28).
---    바꾸는 사람은 admin 과 그 업체의 owner 뿐 (`private.can_control`). viewer 는 보기만 한다.
+--    ★ 설정은 PC 에만 있다 (사용자 확정 10-07). 서버는 설정을 저장하지 않고 명령(`payload`)에 실어 잠깐 건넨다:
+--      보기   웹 `request_settings` → PC 가 다음 poll 에 지금 값을 답한다 → 웹 `take_settings` 가 한 번 읽고 지운다
+--      바꾸기 웹 `set_device_settings` → PC 가 가져갈 때 지운다
+--      남은 것(안 읽힌 답·안 가져간 값)은 `mark_lost`(5분)가 지운다. payload 는 표로 못 읽는다(열 권한)
+--    비밀번호·경로는 오가지 않는다 — `private.clean_settings` 가 허용한 키만 받는다 (사용자 확정 09-28).
+--    바꾸는 사람은 admin 과 그 업체의 owner 뿐 (`private.can_control`). 보기는 그 업체 사람 모두.
 -- ---------------------------------------------------------------------------------------------
-create table if not exists public.device_settings (
-    device_id      uuid primary key references public.devices(id) on delete cascade,
-    account_id     uuid not null references public.accounts(id) on delete cascade,
-    settings       jsonb not null default '{}'::jsonb,
-    version        bigint not null default 0,               -- 바뀔 때마다 +1. 웹 저장은 이 값으로 충돌을 가린다
-    locked_modules text[],                                  -- 기능 고정 빌드면 그 기능 (PC 가 알려 준다). null = 고정 아님
-    updated_at     timestamptz not null default now(),
-    updated_by     text check (length(updated_by) <= 200)   -- 'PC' 또는 웹 사용자 이메일
-);
+-- 10-07 전 판: 서버가 PC 마다 설정 한 판(device_settings)을 들고 있었다 — 자료째 지운다
+drop function if exists public.set_device_settings(uuid, jsonb, bigint);
+drop table if exists public.device_settings;
 
 create table if not exists public.commands (
     id          bigint generated always as identity primary key,
     account_id  uuid not null references public.accounts(id) on delete cascade,
     device_id   uuid not null references public.devices(id) on delete cascade,
-    kind        text not null check (kind in ('start','stop','pause','resume')),
+    kind        text not null,
     modules     text[] not null default '{}' check (cardinality(modules) <= 10),   -- start 만. 빈 배열 = PC 의 선택
     created_by  text check (length(created_by) <= 200),
     created_at  timestamptz not null default now(),
@@ -800,20 +805,22 @@ create table if not exists public.commands (
     done_at     timestamptz,
     result      text check (length(result) <= 200)
 );
+-- 설정 (10-07): settings = 웹이 바꾼 값(PC 가 가져갈 때 지운다) / read_settings = PC 의 답(웹이 한 번 읽으면 지운다)
+alter table public.commands add column if not exists payload jsonb check (pg_column_size(payload) <= 16384);
+alter table public.commands drop constraint if exists commands_kind_check;
+alter table public.commands add constraint commands_kind_check
+    check (kind in ('start','stop','pause','resume','settings','read_settings'));
 create index if not exists commands_device_pending_idx on public.commands(device_id) where taken_at is null;
 create index if not exists commands_device_created_idx on public.commands(device_id, created_at desc);
 
-alter table public.device_settings enable row level security;
-alter table public.commands        enable row level security;
-drop policy if exists device_settings_read on public.device_settings;
+alter table public.commands enable row level security;
 drop policy if exists commands_read on public.commands;
-create policy device_settings_read on public.device_settings for select to authenticated
-    using (private.is_admin() or account_id in (select private.my_account_ids()));
 create policy commands_read on public.commands for select to authenticated
     using (private.is_admin() or account_id in (select private.my_account_ids()));
--- 쓰기 정책은 없다 — 아래 함수 셋만 쓴다
-revoke all on public.device_settings, public.commands from anon, authenticated;
-grant select on public.device_settings, public.commands to authenticated;
+-- 쓰기 정책은 없다 — 아래 함수만 쓴다. payload(설정 값)는 열 권한에서 뺀다 — `take_settings` 로 한 번만 읽는다
+revoke all on public.commands from anon, authenticated;
+grant select (id, account_id, device_id, kind, modules, created_by, created_at, expires_at, taken_at, done_at, result)
+    on public.commands to authenticated;
 
 -- 이 업체의 PC 를 제어할 수 있나 — admin 이거나 그 업체의 owner
 create or replace function private.can_control(account uuid) returns boolean
@@ -887,15 +894,14 @@ $$;
 revoke execute on function private.text_list_ok(jsonb, int, int, int, text[]),
                            private.clean_settings(jsonb) from public, anon, authenticated;
 
--- 웹이 부른다. `base_version` 이 지금 판과 다르면 409 — 그 사이 PC 나 다른 사람이 바꿨다 (다시 읽고 고친다)
--- 그 PC 가 실행 중이면 423 — 실행 중에는 설정을 바꾸지 않는다 (09-29 사용자 요청. 웹도 칸을 잠근다)
-create or replace function public.set_device_settings(device uuid, settings jsonb, base_version bigint)
-returns bigint
+-- 웹이 부른다. 바꿀 값만 명령에 실어 둔다 — PC 가 다음 poll 에 가져가 제 설정 파일에 저장하고, 서버는 그때 지운다.
+-- 그 PC 가 실행 중이면 423 (09-29 사용자 요청. 웹도 칸을 잠근다). 2분 안에 안 가져가면 버린다 — PC 가 꺼졌다.
+-- 기능 고정 빌드의 run_modules 는 PC 가 버린다 (서버는 빌드 구성을 모른다)
+create or replace function public.set_device_settings(device uuid, settings jsonb) returns bigint
 language plpgsql security definer set search_path = '' as $$
 declare
-    v_dev   public.devices%rowtype;
-    v_row   public.device_settings%rowtype;
-    v_clean jsonb;
+    v_dev public.devices%rowtype;
+    v_id  bigint;
 begin
     select * into v_dev from public.devices d where d.id = device and d.revoked_at is null;
     if not found or not private.can_control(v_dev.account_id) then
@@ -904,27 +910,77 @@ begin
     if exists (select 1 from public.runs r where r.device_id = v_dev.id and r.state = 'running') then
         raise exception 'running' using errcode = 'PT423';
     end if;
-    v_clean := private.clean_settings(settings);
-    insert into public.device_settings (device_id, account_id) values (v_dev.id, v_dev.account_id)
-    on conflict (device_id) do nothing;
-    select * into v_row from public.device_settings s where s.device_id = v_dev.id for update;
-    if base_version is distinct from v_row.version then
-        raise exception 'conflict' using errcode = 'PT409';
+    if settings = '{}'::jsonb then
+        raise exception 'bad request' using errcode = 'PT400';
     end if;
-    if v_row.locked_modules is not null then
-        v_clean := v_clean - 'run_modules';          -- 기능 고정 빌드는 기능을 바꾸지 못한다
+    if (select count(*) from public.commands c
+        where c.device_id = v_dev.id and c.taken_at is null and c.expires_at > now()) >= 5 then
+        raise exception 'too many' using errcode = 'PT429';
     end if;
-    update public.device_settings set
-        settings   = v_row.settings || v_clean,
-        version    = v_row.version + 1,
-        updated_at = now(),
-        updated_by = left(coalesce((select u.email from auth.users u where u.id = (select auth.uid())), '웹'), 200)
-    where device_id = v_dev.id;
-    return v_row.version + 1;
+    insert into public.commands (account_id, device_id, kind, payload, created_by, expires_at)
+    values (v_dev.account_id, v_dev.id, 'settings', private.clean_settings(settings),
+            left(coalesce((select u.email from auth.users u where u.id = (select auth.uid())), '웹'), 200),
+            now() + interval '2 minutes')
+    returning id into v_id;
+    return v_id;
 end;
 $$;
-revoke execute on function public.set_device_settings(uuid, jsonb, bigint) from public, anon;
-grant execute on function public.set_device_settings(uuid, jsonb, bigint) to authenticated;   -- 안에서 권한 검사
+revoke execute on function public.set_device_settings(uuid, jsonb) from public, anon;
+grant execute on function public.set_device_settings(uuid, jsonb) to authenticated;   -- 안에서 권한 검사
+
+-- 웹이 부른다 (설정 화면을 열 때). 그 업체 사람이면 누구나 — 보기만 하는 사람도 설정을 본다.
+-- PC 가 다음 poll 에 지금 값을 답하고, 웹은 `take_settings` 로 기다렸다 읽는다. 2분 안에 답이 없으면 PC 가 꺼진 것
+create or replace function public.request_settings(device uuid) returns bigint
+language plpgsql security definer set search_path = '' as $$
+declare
+    v_dev public.devices%rowtype;
+    v_id  bigint;
+begin
+    select * into v_dev from public.devices d where d.id = device and d.revoked_at is null;
+    if not found or not (private.is_admin() or v_dev.account_id in (select private.my_account_ids())) then
+        raise exception 'forbidden' using errcode = 'PT403';
+    end if;
+    if (select count(*) from public.commands c
+        where c.device_id = v_dev.id and c.taken_at is null and c.expires_at > now()) >= 5 then
+        raise exception 'too many' using errcode = 'PT429';
+    end if;
+    insert into public.commands (account_id, device_id, kind, created_by, expires_at)
+    values (v_dev.account_id, v_dev.id, 'read_settings',
+            left(coalesce((select u.email from auth.users u where u.id = (select auth.uid())), '웹'), 200),
+            now() + interval '2 minutes')
+    returning id into v_id;
+    return v_id;
+end;
+$$;
+revoke execute on function public.request_settings(uuid) from public, anon;
+grant execute on function public.request_settings(uuid) to authenticated;   -- 안에서 권한 검사
+
+-- 웹이 부른다. PC 의 답을 **한 번만** 돌려주고 지운다 — {settings, locked_modules}.
+-- 아직이면 null, 끝났는데 값이 없으면 {error: 결과}, 답 없이 시간이 지났으면 {error: 'expired'}
+create or replace function public.take_settings(command bigint) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+    v_cmd public.commands%rowtype;
+begin
+    select * into v_cmd from public.commands c where c.id = command and c.kind = 'read_settings' for update;
+    if not found or not (private.is_admin() or v_cmd.account_id in (select private.my_account_ids())) then
+        raise exception 'forbidden' using errcode = 'PT403';
+    end if;
+    if v_cmd.payload is not null then
+        update public.commands c set payload = null where c.id = v_cmd.id;
+        return v_cmd.payload;
+    end if;
+    if v_cmd.done_at is not null then
+        return jsonb_build_object('error', coalesce(v_cmd.result, ''));
+    end if;
+    if v_cmd.expires_at <= now() then
+        return jsonb_build_object('error', 'expired');
+    end if;
+    return null;
+end;
+$$;
+revoke execute on function public.take_settings(bigint) from public, anon;
+grant execute on function public.take_settings(bigint) to authenticated;   -- 안에서 권한 검사
 
 -- 웹이 부른다. 정해진 네 가지만. PC 는 다음 poll(30초 안)에 가져간다
 create or replace function public.send_command(device uuid, kind text, modules text[] default '{}')
@@ -961,23 +1017,22 @@ revoke execute on function public.send_command(uuid, text, text[]) from public, 
 grant execute on function public.send_command(uuid, text, text[]) to authenticated;
 
 -- RPA 가 30초마다 부른다. POST /rest/v1/rpc/poll
---   pushed         PC 에서 고친 설정. **PC 가 서버의 최신판을 이미 받았을 때만** 받는다 — 웹에서 막 바꾼 것을 덮지 않는다
---   locked_modules 기능 고정 빌드의 기능. 빈 배열 = 고정 아님, null = 알리지 않음
---   results        [{id, result}] 지난번에 받은 명령의 결과
--- 돌려주는 것: version, settings(서버 판이 PC 가 아는 것보다 새것일 때만), commands [{id, kind, modules}]
+--   results  [{id, result, settings?, locked_modules?}] 지난번에 받은 명령의 결과. read_settings 의 답에는 지금 설정과
+--            기능 고정 빌드의 기능이 실린다 (웹이 한 번 읽으면 지운다). 값이 규칙에 어긋나면 그 답만 버린다
+--   known_version·pushed·locked_modules 는 10-07 전 PC 가 보낸다 — 받기만 하고 쓰지 않는다 (설정을 서버에 두지 않는다)
+-- 돌려주는 것: commands [{id, kind, modules, settings}] — settings 는 웹이 바꾼 값 (settings 명령). 건넨 뒤 지운다
 create or replace function public.poll(device_key text, machine text, known_version bigint default 0,
                                        pushed jsonb default null, locked_modules text[] default null,
                                        results jsonb default null) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 #variable_conflict use_variable
 declare
-    v_dev  public.devices%rowtype;
-    v_row  public.device_settings%rowtype;
-    v_res  jsonb;
-    v_cmds jsonb;
+    v_dev   public.devices%rowtype;
+    v_res   jsonb;
+    v_reply jsonb;
+    v_cmds  jsonb;
 begin
-    if (results is not null and (jsonb_typeof(results) <> 'array' or jsonb_array_length(results) > 20))
-       or coalesce(cardinality(locked_modules), 0) > 4 then
+    if results is not null and (jsonb_typeof(results) <> 'array' or jsonb_array_length(results) > 20) then
         raise exception 'bad request' using errcode = 'PT400';
     end if;
     v_dev := private.bind_device(device_key, machine);
@@ -985,46 +1040,43 @@ begin
 
     if results is not null then
         for v_res in select * from jsonb_array_elements(results) loop
-            update public.commands c set result = left(v_res->>'result', 200), done_at = now()
+            v_reply := null;
+            if v_res ? 'settings' then
+                begin
+                    v_reply := jsonb_build_object('settings', private.clean_settings(v_res->'settings'),
+                        'locked_modules', case when private.text_list_ok(v_res->'locked_modules', 1, 4, 20,
+                                               array['mail','orders','logistics_wait','logistics'])
+                                          then v_res->'locked_modules' end);
+                exception when others then
+                    v_reply := null;            -- 규칙에 어긋난 값 — 이 답만 버린다 (명령 결과는 계속 받는다)
+                end;
+            end if;
+            update public.commands c set done_at = now(),
+                   result = case when v_res ? 'settings' and v_reply is null
+                                 then '설정 값이 서버 규칙에 맞지 않아 버렸다' else left(v_res->>'result', 200) end,
+                   payload = case when c.kind = 'read_settings' then v_reply end
             where c.id = (v_res->>'id')::bigint and c.device_id = v_dev.id and c.done_at is null;
         end loop;
     end if;
 
-    insert into public.device_settings (device_id, account_id) values (v_dev.id, v_dev.account_id)
-    on conflict (device_id) do nothing;
-    select * into v_row from public.device_settings s where s.device_id = v_dev.id for update;
-    if locked_modules is not null then
-        update public.device_settings s set locked_modules = nullif(locked_modules, '{}'::text[])
-        where s.device_id = v_dev.id;
-    end if;
-    -- 값이 실제로 바뀔 때만 판을 올린다 — PC 가 켤 때마다 같은 값을 올려도 웹 편집이 409 로 막히지 않게
-    if pushed is not null and coalesce(known_version, 0) = v_row.version
-       and v_row.settings || private.clean_settings(pushed) <> v_row.settings then
-        v_row.settings := v_row.settings || private.clean_settings(pushed);
-        v_row.version := v_row.version + 1;
-        update public.device_settings s set settings = v_row.settings, version = v_row.version,
-               updated_at = now(), updated_by = 'PC'
-        where s.device_id = v_dev.id;
-    end if;
-
-    -- 만료된 것은 결과를 적고 닫는다. 남은 것을 가져간다 (한 번만 — taken_at)
-    update public.commands c set taken_at = now(), done_at = now(),
-           result = '만료 — PC 가 10분 안에 가져가지 않았다'
+    -- 만료된 것은 결과를 적고 닫는다 (실어 둔 값도 지운다). 남은 것을 가져간다 (한 번만 — taken_at)
+    update public.commands c set taken_at = now(), done_at = now(), payload = null,
+           result = '만료 — PC 가 제때 가져가지 않았다'
     where c.device_id = v_dev.id and c.taken_at is null and c.expires_at <= now();
-    with taken as (
-        update public.commands c set taken_at = now()
+    with picked as (
+        select c.id, c.kind, c.modules, c.payload from public.commands c
         where c.device_id = v_dev.id and c.taken_at is null
-        returning c.id, c.kind, c.modules
+        for update
+    ), taken as (
+        update public.commands c set taken_at = now(), payload = null      -- 웹이 바꾼 값은 건넨 뒤 지운다
+        from picked p where c.id = p.id
+        returning p.id, p.kind, p.modules, p.payload
     )
-    select coalesce(jsonb_agg(jsonb_build_object('id', t.id, 'kind', t.kind, 'modules', to_jsonb(t.modules))
-                              order by t.id), '[]'::jsonb)
+    select coalesce(jsonb_agg(jsonb_build_object('id', t.id, 'kind', t.kind, 'modules', to_jsonb(t.modules),
+                                                 'settings', t.payload) order by t.id), '[]'::jsonb)
     into v_cmds from taken t;
 
-    return jsonb_build_object(
-        'version',  v_row.version,
-        'settings', case when coalesce(known_version, 0) < v_row.version then v_row.settings end,
-        'commands', v_cmds,
-        'server_time', now());
+    return jsonb_build_object('commands', v_cmds, 'server_time', now());
 end;
 $$;
 revoke execute on function public.poll(text, text, bigint, jsonb, text[], jsonb) from public, authenticated;

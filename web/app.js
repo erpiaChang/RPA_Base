@@ -21,7 +21,10 @@ const SMS = [["휴대폰 연결", "phonelink", "usb"], ["adb (USB 케이블)", "
 // 매출처리 방식 (10-01) — 값 = automation/order_mapping.SALES_MODES, 글 = gui/run_app.SALES_LABELS
 const SALES = [["전체", "전체 매출처리 — 조회 안 된 미매출 주문까지"], ["선택주문", "선택주문 매출처리 — 조회된 주문만"]];
 // 단추 이름 (사용자 확정 09-28). 일시정지·계속하기는 **예약**을 멈추고 다시 돌린다 — 도는 실행은 [RPA 종료] 로
-const COMMAND_LABELS = { start: "실행", stop: "RPA 종료", pause: "일시정지", resume: "계속하기" };
+const COMMAND_LABELS = { start: "실행", stop: "RPA 종료", pause: "일시정지", resume: "계속하기", settings: "설정 바꾸기" };
+const SUSPENDED_TEXT = "이 업체는 관리자가 사용을 중지했습니다. RPA 가 돌지 않습니다 — 관리자에게 문의하세요.";
+// 설정은 PC 에만 있다 (10-07) — 화면을 열 때 PC 에 묻는다. PC 는 30초마다 확인하고, 서버는 2분 안에 안 오면 버린다
+const SETTINGS_WAIT_MS = 2000, SETTINGS_WAIT_TRIES = 70;
 // 실행 중에는 웹에서도 설정을 바꾸지 않는다 (09-29 사용자 요청). 서버 set_device_settings 도 423 으로 거절한다
 const RUNNING_LOCK_TEXT = "PC 가 실행 중이라 설정을 바꿀 수 없습니다. 실행이 끝나면 다시 바꿀 수 있습니다.";
 const ONLINE_SEC = 90;
@@ -31,11 +34,11 @@ const ONLINE_TEXT = "켜져 있음", OFFLINE_TEXT = "꺼짐 (연결 안 됨)";  
 const USAGE_COLS = [["mail", "메일 엑셀 받기"], ["orders", "주문수집·매출처리"], ["logistics_wait", "물류대기"], ["logistics", "물류관리"]];
 const PERIODS = [["this", "이번 달"], ["last", "지난달"], ["30", "최근 30일"]];
 const TABS = [["home", "요약"], ["usage", "사용량"], ["devices", "PC"], ["history", "실행 기록"]];
-const PW_MIN = 8, PW_MAX = 72;   // 새 비밀번호 길이 (72 = 인증 서버 상한, 10-07)
 
 const cfg = window.RPA_CONFIG || {};
 const main = document.getElementById("main");
 let sb = null, me = null, isAdmin = false, accountId = "", timers = [], onVisible = null, myMembers = [], accountNames = {};
+let accountSuspended = {};   // 업체 id → 중지 시각 (10-07). 관리자가 PC 탭에서 중지·해제한다
 let usagePeriod = "this";
 
 // ---------------------------------------------------------------- DOM (textContent 만)
@@ -161,71 +164,8 @@ function renderLogin(msg) {
   main.appendChild(form);
 }
 
-// ---------------------------------------------------------------- 본인 비밀번호 바꾸기 (#/account, 10-07)
-function passwordProblem(cur, nw, nw2) {
-  if (!cur) return "현재 비밀번호를 넣으세요.";
-  if (nw.length < PW_MIN) return `새 비밀번호는 ${PW_MIN}자 이상이어야 합니다.`;
-  // 서버 상한은 바이트 — 한글은 한 글자가 3바이트라 글자 수로 세면 통과하고 서버가 거절한다 (10-07 검토)
-  if (new TextEncoder().encode(nw).length > PW_MAX) return "새 비밀번호가 너무 깁니다. 영문·숫자로는 72자까지입니다.";
-  if (nw !== nw2) return "다시 입력한 비밀번호가 다릅니다.";
-  if (nw === cur) return "지금 비밀번호와 같습니다.";
-  return "";
-}
-
-// 현재 비밀번호로 다시 확인 → 바꾸기 → 다른 곳의 로그인 끊기. 서버 글은 쓰지 않고 오류 코드만 문구로 바꾼다
-async function changePassword(cur, nw) {
-  const email = me && me.email;
-  if (!email) return { ok: false, text: "로그인 정보를 읽지 못했습니다. 다시 로그인하세요." };
-  const re = await sb.auth.signInWithPassword({ email, password: cur });
-  if (re.error) {
-    if (re.error.status === 400) return { ok: false, text: "현재 비밀번호가 맞지 않습니다." };
-    if (re.error.status === 429) return { ok: false, text: "시도가 너무 많습니다. 잠시 뒤 다시 하세요." };
-    return { ok: false, text: `확인하지 못했습니다 (${re.error.code || re.error.status || "연결"}).` };
-  }
-  const up = await sb.auth.updateUser({ password: nw });
-  if (up.error) {
-    const code = up.error.code || "";
-    if (code === "same_password") return { ok: false, text: "지금 비밀번호와 같습니다." };
-    if (code === "weak_password") return { ok: false, text: "비밀번호가 너무 짧거나 단순합니다." };
-    if (up.error.status === 429) return { ok: false, text: "시도가 너무 많습니다. 잠시 뒤 다시 하세요." };
-    return { ok: false, text: `바꾸지 못했습니다 (${code || up.error.status || "연결"}).` };
-  }
-  const out = await sb.auth.signOut({ scope: "others" });
-  return { ok: true, text: out.error
-    ? "비밀번호를 바꿨습니다. 다른 곳의 로그인은 끊지 못했습니다."
-    : "비밀번호를 바꿨습니다. 다른 기기에서는 다시 로그인해야 합니다." };
-}
-
-function renderAccount() {
-  const cur = h("input", { id: "pwCur", type: "password", autocomplete: "current-password", required: "" });
-  const nw = h("input", { id: "pwNew", type: "password", autocomplete: "new-password", required: "", maxlength: String(PW_MAX) });
-  const nw2 = h("input", { id: "pwNew2", type: "password", autocomplete: "new-password", required: "", maxlength: String(PW_MAX) });
-  const msg = h("div", { id: "pwMsg", class: "note", role: "status", text: "" });
-  const submit = h("button", { id: "pwSubmit", class: "primary", type: "submit", text: "비밀번호 바꾸기" });
-  const form = h("form", { class: "login account", onsubmit: async e => {
-    e.preventDefault();
-    if (submit.disabled) return;                    // 두 번 눌러도 요청이 겹치지 않게
-    const problem = passwordProblem(cur.value, nw.value, nw2.value);
-    if (problem) { msg.className = "err"; msg.textContent = problem; return; }
-    submit.disabled = true;
-    msg.className = "note"; msg.textContent = "바꾸는 중...";
-    const result = await changePassword(cur.value, nw.value);
-    if (!form.isConnected) return;                  // 기다리는 사이 다른 화면으로 갔다
-    submit.disabled = false;
-    if (result.ok) cur.value = nw.value = nw2.value = "";
-    msg.className = result.ok ? "note" : "err";
-    msg.textContent = result.text;
-  } }, h("h2", { text: "비밀번호 바꾸기" }), h("div", { class: "note", text: (me && me.email) || "" }),
-     h("label", {}, "현재 비밀번호", cur), h("label", {}, `새 비밀번호 (${PW_MIN}자 이상)`, nw),
-     h("label", {}, "새 비밀번호 다시", nw2), submit, msg,
-     h("button", { type: "button", text: "돌아가기", onclick: () => go("#/home") }));
-  main.appendChild(form);
-  cur.focus();
-}
-
 function showHeader(on) {
   document.getElementById("logoutBtn").classList.toggle("hidden", !on);
-  document.getElementById("pwBtn").classList.toggle("hidden", !on);
   document.getElementById("tabs").classList.toggle("hidden", !on);
   document.getElementById("helpBtn").classList.toggle("hidden", !on);
   if (!on) {
@@ -260,10 +200,11 @@ async function boot() {
 
 async function setupAccountSelect() {
   const sel = document.getElementById("accountSel");
-  const { data: accounts } = await sb.from("accounts").select("id, name").order("name");
+  const { data: accounts } = await sb.from("accounts").select("id, name, suspended_at").order("name");
   clear(sel);
   const list = accounts || [];
   accountNames = Object.fromEntries(list.map(a => [a.id, a.name]));
+  accountSuspended = Object.fromEntries(list.map(a => [a.id, a.suspended_at || null]));
   if (isAdmin) sel.appendChild(h("option", { value: "", text: "전체 업체" }));
   for (const a of list) sel.appendChild(h("option", { value: a.id, text: a.name }));
   accountId = isAdmin ? "" : (list[0] ? list[0].id : "");
@@ -294,7 +235,6 @@ function render() {
   const [, page, id] = (location.hash || "#/home").split("/");
   stopTimers();
   clear(main);
-  if (page === "account") { markTab(""); renderAccount(); return; }
   if (page === "device" && id) { markTab("devices"); renderDevice(id); return; }
   if (page === "run" && id) { markTab("history"); renderDetail(id); return; }
   const known = TABS.some(t => t[0] === page) ? page : "home";
@@ -553,9 +493,41 @@ function exportUsage(rows, from, to, note) {
 // ---------------------------------------------------------------- PC 목록
 function renderDevices() {
   const body = loading();
-  main.append(h("div", { class: "page-title" }, h("h2", { text: "PC" })), section("", body,
-    h("div", { class: "note", text: "PC 를 누르면 켜짐 상태·원격 제어·설정·명령 기록이 열립니다." })));
+  main.append(h("div", { class: "page-title" }, h("h2", { text: "PC" })));
+  // 업체 단위 중지 (10-07) — 관리자는 업체를 고르면 중지·해제, 그 업체 사람은 중지됐다는 안내만
+  if (isAdmin && accountId) main.append(suspendSection(accountId));
+  else if (accountId && accountSuspended[accountId]) main.append(section("", h("div", { class: "err", text: SUSPENDED_TEXT })));
+  main.append(section("", body, h("div", { class: "note", text: "PC 를 누르면 켜짐 상태·원격 제어·설정·명령 기록이 열립니다." })));
   every(POLL_LIVE_MS, () => loadDevices(body));
+}
+
+function suspendSection(accId) {
+  const box = h("section", {});
+  const draw = () => {
+    clear(box);
+    const since = accountSuspended[accId], name = accountNames[accId] || "";
+    const note = h("div", { class: "note", role: "status" });
+    const btn = h("button", { class: since ? "primary" : "", text: since ? "중지 풀기" : "이 업체 RPA 중지", onclick: async () => {
+      const ask = since ? `'${name}' 업체의 중지를 풉니다. 그 업체의 PC 는 10분 안에 다시 돕니다. 계속할까요?`
+        : `'${name}' 업체의 모든 PC 에서 RPA 를 멈춥니다. 실행·예약이 막히고 업체 담당자는 웹에서 제어할 수 없습니다. 계속할까요?`;
+      if (!window.confirm(ask)) return;
+      btn.disabled = true; note.textContent = "보내는 중...";
+      const { error } = await sb.rpc(since ? "resume_account" : "suspend_account", { account: accId });
+      if (!box.isConnected) return;
+      btn.disabled = false;
+      if (error) { note.textContent = "하지 못했습니다: " + error.message; return; }
+      accountSuspended[accId] = since ? null : new Date().toISOString();
+      draw();
+    } });
+    box.append(h("h2", { text: "업체 사용" }),
+      h("div", {}, h("span", { class: since ? "state-failed" : "state-done", text: since ? `중지됨 — ${fmtTime(since)}부터` : "사용 중" })),
+      h("div", { class: "toolbar" }, btn),
+      h("div", { class: "note", text: "중지하면 그 업체의 모든 PC 가 30초 안에 실행·예약을 멈춥니다 (도는 실행은 끝까지 갑니다). " +
+        "자료와 빌드는 그대로이고, 중지를 풀면 PC 가 10분 안에 다시 돕니다." }),
+      note);
+  };
+  draw();
+  return box;
 }
 
 // 09-28: 업체 등록 토큰 발급 폼을 없앴다. 빌드 ID 는 **빌드 프로그램이 빌드할 때** 서버에서 받아
@@ -641,16 +613,15 @@ async function renderDevice(deviceId, message) {
   const back = h("button", { text: "← PC 목록", onclick: () => go("#/devices") });
   const head = h("section", {}, h("div", { class: "toolbar" }, back), h("div", { class: "note", text: "불러오는 중..." }));
   main.appendChild(head);
-  const [{ data: dev, error }, { data: rows, error: setErr }] = await Promise.all([
-    sb.from("devices").select("*, accounts(name)").eq("id", deviceId).single(),
-    sb.from("device_settings").select("*").eq("device_id", deviceId),
-  ]);
+  const { data: dev, error } = await sb.from("devices").select("*, accounts(name)").eq("id", deviceId).single();
   // 기다리는 사이 다른 화면으로 옮겼으면 그리지 않는다 — 제어 단추·타이머가 다른 화면에 붙는다
   if (!head.isConnected) return;
   if (error || !dev) { say(head.children[1], "PC 를 읽지 못했습니다.", "err"); return; }
-  if (setErr) message = message || "설정을 읽지 못해 잠가 두었습니다 — 잠시 뒤 새로 고치세요.";
-  const row = (rows && rows[0]) || { settings: {}, version: 0, locked_modules: null };
+  if (accountSuspended[dev.account_id]) {
+    message = message || (isAdmin ? "이 업체는 사용 중지 상태입니다 — PC 탭에서 업체를 골라 풀 수 있습니다." : SUSPENDED_TEXT);
+  }
   const control = canControl(dev.account_id) && !dev.revoked_at;
+  let lastSeen = dev.last_seen_at;           // 5초 갱신이 바꾼다 — 설정을 물을 때 켜져 있나 본다
   const status = h("div");
   clear(head.children[1]);
   // ★ append() 에 null 을 넘기면 "null" 글자가 붙는다 — 빈 자리는 걸러서 넘긴다 (09-28 사진으로 발견)
@@ -662,11 +633,17 @@ async function renderDevice(deviceId, message) {
   // --- 제어 ---
   const cmdBody = loading();
   let showState = null;     // 제어 단추를 지금 상태에 맞춰 켜고 끈다 — refresh 가 부른다
+  let showPicks = null;     // PC 설정을 받으면 기능 체크를 PC 값으로 (기능 고정 빌드는 그 기능만)
   if (control) {
-    const locked = row.locked_modules;
-    const wanted = new Set(row.settings.run_modules || []);
-    const picks = MODULES.filter(([id]) => !locked || locked.includes(id))
-      .map(([id, name]) => Object.assign(checkbox(name, !locked ? wanted.has(id) : true), { id }));
+    const picks = MODULES.map(([id, name]) => Object.assign(checkbox(name, false), { id }));
+    showPicks = snap => {
+      const locked = snap.locked_modules, wanted = new Set(snap.settings.run_modules || []);
+      for (const p of picks) {
+        const allowed = !locked || locked.includes(p.id);
+        p.el.classList.toggle("hidden", !allowed);
+        p.box.checked = locked ? allowed : wanted.has(p.id);
+      }
+    };
     const note = h("div", { class: "note", role: "status" });
     const send = async (kind, modules) => {
       const ask = { start: "이 PC 에서 지금 실행합니다. 실계정 저장이 돌 수 있습니다. 계속할까요?",
@@ -702,7 +679,7 @@ async function renderDevice(deviceId, message) {
   }
 
   // --- 설정 ---
-  const settings = settingsSection(deviceId, row, control);
+  const settings = settingsSection(deviceId, control, () => ageSec(lastSeen) < ONLINE_SEC, snap => showPicks && showPicks(snap));
   main.appendChild(settings);
 
   // --- 명령 기록 ---
@@ -715,6 +692,7 @@ async function renderDevice(deviceId, message) {
     ]);
     clear(status);
     if (d) {
+      lastSeen = d.last_seen_at;
       const online = ageSec(d.last_seen_at) < ONLINE_SEC;
       status.append(h("span", { class: online ? "state-done" : "state-pending", text: online ? ONLINE_TEXT : OFFLINE_TEXT }),
         h("span", { class: "note", text: ` · 마지막 접속 ${agoText(d.last_seen_at)}` +
@@ -730,11 +708,51 @@ async function renderDevice(deviceId, message) {
   every(POLL_LIVE_MS, refresh);
 }
 
-function settingsSection(deviceId, row, editable) {
-  const s = row.settings || {};
-  const locked = row.locked_modules;
-  // PC 가 아직 값을 올리지 않았으면(판 0) 칸이 비어 있다 — 그대로 저장하면 PC 의 구운 값을 빈 값으로 덮는다
-  const off = !editable || !row.version;
+// 설정 (10-07 개편) — 설정은 PC 에만 있다. 화면을 열 때 PC 에 지금 값을 묻고(request_settings), 답을 한 번 읽는다
+// (take_settings — 서버는 읽히면 지운다). 바꾼 값은 명령으로 보내고 PC 가 가져가면 서버에서 지워진다
+function settingsSection(deviceId, editable, online, onSnapshot) {
+  const status = h("div", { class: "note", role: "status" });
+  const body = h("div");
+  const reload = h("button", { text: "다시 받아 오기", onclick: () => load() });
+  let form = null, running = false;
+  const section = h("section", {}, h("h2", { text: "설정" }),
+    h("div", { class: "note", text: "설정은 PC 에만 저장됩니다. 이 화면을 열 때 PC 에서 지금 값을 받아 옵니다 (서버에 남지 않습니다)." }),
+    h("div", { class: "note", text: "비밀번호와 PC 의 폴더 경로는 여기서 보거나 바꾸지 않습니다 — PC 의 실행 창에서만 넣습니다." }),
+    h("div", { class: "toolbar" }, status, reload), body);
+  section.setRunning = r => { running = r; if (form) form.setRunning(r); };
+  const load = async () => {
+    reload.disabled = true; clear(body); form = null;
+    if (!online()) { status.textContent = "PC 가 꺼져 있어 설정을 볼 수 없습니다. PC 가 켜지면 [다시 받아 오기] 를 누르세요."; reload.disabled = false; return; }
+    status.textContent = "PC 에서 지금 설정을 받아 오는 중입니다... (PC 는 30초마다 확인합니다)";
+    const { data: id, error } = await sb.rpc("request_settings", { device: deviceId });
+    let got = error ? { error: error.message } : null;
+    for (let i = 0; !got && i < SETTINGS_WAIT_TRIES; i++) {
+      await new Promise(r => setTimeout(r, SETTINGS_WAIT_MS));
+      if (!section.isConnected) return;               // 다른 화면으로 갔다 — 답은 서버가 2분 뒤 지운다
+      const { data, error: e } = await sb.rpc("take_settings", { command: id });
+      got = e ? { error: e.message } : data;
+    }
+    if (!section.isConnected) return;
+    reload.disabled = false;
+    if (!got || !got.settings) {
+      status.textContent = !got || got.error === "expired" ? "PC 가 2분 안에 답하지 않았습니다 — 꺼졌거나 서버에 닿지 않습니다."
+        : "PC 에서 설정을 받지 못했습니다: " + got.error;
+      return;
+    }
+    status.textContent = `PC 에서 받은 값입니다 (${fmtTime(new Date().toISOString())}).`;
+    form = settingsForm(deviceId, got, editable);
+    form.setRunning(running);
+    body.appendChild(form.el);
+    if (onSnapshot) onSnapshot(got);
+  };
+  load();
+  return section;
+}
+
+function settingsForm(deviceId, snap, editable) {
+  const s = Object.assign({}, snap.settings || {});
+  const locked = snap.locked_modules;
+  const off = !editable;
   const mods = MODULES.map(([id, name]) => Object.assign(checkbox(name, (s.run_modules || []).includes(id), off || !!locked), { id }));
   const srcs = SOURCES.map(([id, name]) => Object.assign(checkbox(name, (s.collect_sources || []).includes(id), off), { id }));
   const courier = textInput(s.delivery_company, off), box = textInput(s.delivery_box, off);
@@ -798,19 +816,22 @@ function settingsSection(deviceId, row, editable) {
   const save = h("button", { class: "primary", text: "저장", onclick: async () => {
     const values = read();
     if (typeof values === "string") { note.textContent = values; return; }
-    save.disabled = true; note.textContent = "저장하는 중...";
-    const { data, error } = await sb.rpc("set_device_settings", { device: deviceId, settings: values, base_version: row.version });
+    // 바꾼 것만 보낸다 — 그 사이 PC 에서 고친 다른 값을 덮지 않게
+    const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+    const changed = Object.fromEntries(Object.entries(values).filter(([k, v]) => !same(v, s[k])));
+    if (!Object.keys(changed).length) { note.textContent = "바뀐 것이 없습니다."; return; }
+    save.disabled = true; note.textContent = "보내는 중...";
+    const { error } = await sb.rpc("set_device_settings", { device: deviceId, settings: changed });
     save.disabled = false;
-    if (error && (error.code === "PT409" || /conflict/.test(error.message || ""))) {
-      if (save.isConnected) renderDevice(deviceId, "그 사이 PC 나 다른 사람이 설정을 바꿨습니다. 새 값을 불러왔으니 다시 고쳐 저장하세요.");
-      return;
-    }
     if (error && (error.code === "PT423" || /running/.test(error.message || ""))) {
       note.textContent = RUNNING_LOCK_TEXT; setRunning(true); return;
     }
-    if (error) { note.textContent = "저장하지 못했습니다: " + error.message; return; }
-    row.version = data;
-    note.textContent = "저장했습니다. PC 가 30초 안에 받습니다.";
+    if (error && (error.code === "PT429" || /too many/.test(error.message || ""))) {
+      note.textContent = "PC 가 앞의 요청을 아직 가져가지 않았습니다. PC 가 켜져 있는지 보고 잠시 뒤 다시 하세요."; return;
+    }
+    if (error) { note.textContent = "보내지 못했습니다: " + error.message; return; }
+    Object.assign(s, changed);
+    note.textContent = "보냈습니다. PC 가 30초 안에 제 설정에 저장합니다 — 결과는 아래 명령 기록에 남습니다.";
   } });
   save.disabled = off;
   // PC 가 실행 중이면 칸을 잠근다 (09-29 사용자 요청 — 서버도 423 으로 거절한다). 기기 화면의 5초 갱신이 부른다
@@ -841,17 +862,13 @@ function settingsSection(deviceId, row, editable) {
     ...line("예약 줄 (한 줄에 하나)", times, h("div", { class: "note", text: "예) 평일 09:00 · 월수금 13:00 mail,orders · 매월 25일 18:00 · 2026-10-01 14:00 — " +
       "끝에 기능을 붙이면 그 기능만: mail(메일 엑셀 받기) · orders(주문수집·매출처리) · logistics_wait(물류대기) · logistics(물류관리)" })),
     ...line("간격 (분)", interval));
-  const section = h("section", {}, h("h2", { text: "설정" }),
-    h("div", { class: "note", text: row.version ? `마지막으로 바꾼 곳: ${row.updated_by || ""} · ${fmtTime(row.updated_at)}`
-      : "PC 가 아직 설정을 올리지 않았습니다. PC 를 한 번 켜면 지금 값이 올라오고, 그 뒤에 여기서 바꿀 수 있습니다." }),
-    h("div", { class: "note", text: "비밀번호와 PC 의 폴더 경로는 여기서 바꾸지 않습니다 — PC 의 실행 창에서만 넣습니다." }),
-    busyNote, form, h("div", { class: "toolbar" }, save), note);
-  section.setRunning = setRunning;
-  return section;
+  return { el: h("div", {}, busyNote, form, h("div", { class: "toolbar" }, save), note), setRunning };
 }
 
 async function loadCommands(body, deviceId) {
-  const { data, error } = await sb.from("commands").select("*").eq("device_id", deviceId)
+  // 설정 값(payload)은 열 권한이 없어 고르지 않는다. 설정 보기 요청(read_settings)은 화면을 열 때마다 생겨 뺀다
+  const { data, error } = await sb.from("commands").select("id, kind, modules, created_by, created_at, taken_at, result")
+    .eq("device_id", deviceId).neq("kind", "read_settings")
     .order("created_at", { ascending: false }).limit(20);
   if (error) { say(body, "읽지 못했습니다: " + error.message, "err"); return; }
   if (!data || !data.length) { say(body, "보낸 명령이 없습니다."); return; }
@@ -1248,7 +1265,7 @@ const help = (() => {
   sb = window.supabase.createClient(cfg.url, cfg.anonKey, { auth: { storage: window.sessionStorage, persistSession: true, autoRefreshToken: true } });
   sb.auth.onAuthStateChange(event => {
     if (event === "SIGNED_OUT") {
-      me = null; isAdmin = false; accountId = ""; myMembers = []; accountNames = {};
+      me = null; isAdmin = false; accountId = ""; myMembers = []; accountNames = {}; accountSuspended = {};
       history.replaceState(null, "", "#/home");
       showHeader(false); renderLogin("로그인이 끝났습니다. 다시 로그인하세요.");
     }
@@ -1256,7 +1273,6 @@ const help = (() => {
   document.getElementById("logoutBtn").addEventListener("click", async () => {
     stopTimers(); await sb.auth.signOut();
   });
-  document.getElementById("pwBtn").addEventListener("click", () => go("#/account"));
   window.addEventListener("hashchange", render);
   boot();
 })();

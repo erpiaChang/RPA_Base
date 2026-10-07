@@ -350,9 +350,10 @@ def check_alert(server: FakeServer) -> list[bool]:
                      "alter table public.accounts add column if not exists suspended_at timestamptz" in schema
                      and 0 <= bind.find("suspended_at is not null") < bind.find("update public.devices set machine_hash")
                      and "m.role = 'admin'\n" in control and "suspended_at is not null" in control))
-    out.append(check("중지·재개 함수는 관리자만, 웹·PC 에 주지 않는다",
-                     all(f"revoke execute on function public.{name}(uuid) from public, anon, authenticated;" in schema
-                         and f"grant execute on function public.{name}" not in schema
+    out.append(check("중지·재개 함수는 관리자만 — 웹(로그인) 에만 실행을 주고 안에서 is_admin, PC(anon) 는 못 부른다 (10-07)",
+                     all(f"revoke execute on function public.{name}(uuid) from public, anon;" in schema
+                         and f"grant execute on function public.{name}(uuid) to authenticated;" in schema
+                         and f"grant execute on function public.{name}(uuid) to anon" not in schema
                          for name in ("suspend_account", "resume_account"))
                      and schema.count("session_user <> 'postgres' and not private.is_admin()") >= 3))
     rls = (Path(__file__).resolve().parent.parent / "server" / "tests" / "rls_check.sql").read_text(encoding="utf-8")

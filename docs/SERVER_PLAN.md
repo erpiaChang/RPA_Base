@@ -39,7 +39,8 @@
 | 보관 | `runs` / `run_steps` / `run_logs` / `run_attention` |
 | 판정 (사람 없이) | `mark_lost` 5분마다(10분 무응답) / `purge_old` 하루 1회 180일 / `send_alerts` 1분마다 메일 (10-02 — 끊김·무인 실행 실패/확인할 것·UAC 대기·휴대폰 점검 실패, 업체 owner·admin 따로) |
 | 발급 | `register_build`(관리자 — 빌드 프로그램이 부른다) · `revoke_device`(SQL). 09-23 의 토큰 함수 셋은 지웠다 |
-| 원격 (09-28) | `poll`(PC, 30초) · `set_device_settings`·`send_command`(웹, admin·owner) — D-7 |
+| 원격 (09-28, 10-07 개편) | `poll`(PC, 30초) · `set_device_settings`·`send_command`(웹, admin·owner) · `request_settings`·`take_settings`(웹, 그 업체 사람) — D-7. **설정은 저장하지 않는다** |
+| 업체 중지 (10-07) | `suspend_account`·`resume_account` — 웹 관리자(PC 탭에서 업체를 고른다)·SQL. 안에서 `is_admin` |
 | 사용법 질문 (09-28) | `ask_question`·`llm_online`(웹, 회원 누구나) · `llm_take`·`llm_write`(LLM 워커 키) · `expire_questions` 1분마다 — D-8 |
 | 사용량 (09-28) | `usage_daily`(읽기만, RLS) · `refresh_usage` 10분마다 — D-9 |
 | 시각의 기준 | `received_at`·`heartbeat_at` 은 **서버 시각.** PC 시계는 정렬에만 쓴다 |
@@ -48,9 +49,10 @@
 
 위쪽 탭 넷 — **요약 · 사용량 · PC · 실행 기록** (주소 `#/...`), PC 한 대 화면에 켜짐·제어·설정·명령 기록, 어디서나
 여는 [사용법 질문] 옆 패널. PC 가 실행 중이면 설정 칸·[저장] 이 잠긴다(서버도 423). 실시간 구독이 아니라 폴링.
-로그인은 이메일+비밀번호, 가입 화면 없음, 세션은 `sessionStorage`. 쓰기는 RPC 셋(`send_command`·`set_device_settings`·`ask_question`)뿐이다.
+로그인은 이메일+비밀번호, 가입 화면 없음, 세션은 `sessionStorage`. 쓰기는 RPC 뿐이다 (`send_command`·`set_device_settings`·`ask_question`,
+관리자의 `suspend_account`·`resume_account`). PC 설정은 화면을 열 때 PC 에 묻는다 (`request_settings` → `take_settings`, D-7).
 
-**할 수 없는 것**: 기기 폐기, 사용자 추가, 비밀번호·PC 경로 바꾸기. 앞 둘은 SQL Editor 몫이다.
+**할 수 없는 것**: 기기 폐기, 사용자 추가, 비밀번호(RPA·웹 로그인 모두 — 10-07 사용자 확정, 웹 로그인 비밀번호는 관리자에게)·PC 경로 바꾸기. 앞 둘은 SQL Editor 몫이다.
 
 ## D-5. 경계선 — 누가 무엇을 못 하나
 
@@ -58,7 +60,7 @@
 | --- | --- | --- |
 | ERPia 화면 조작 | **한다** | 못 한다 (영원히) |
 | 실행을 시작/중지 | 한다 (사람·예약·**가져간 원격 명령**) | **명령을 남긴다** — 실행 여부는 RPA 가 판정한다 (잠김·실행 중·확인 전이면 거절, D-7) |
-| 설정 | 받아서 저장·적용 (실행 중이면 끝난 뒤) | **보관·검사한다** — 허용 키만, 비밀번호 없음 |
+| 설정 | **원본을 가진다** — 묻으면 답하고, 받은 값을 저장·적용 (실행 중이면 끝난 뒤) | **저장하지 않는다** (10-07) — 명령에 실어 건네고 지운다. 허용 키만 검사, 비밀번호 없음 |
 | 무엇이 실패인지 판단 | **한다** (`friendly.py`) | 받은 상태값을 그대로 믿는다 |
 | 끊김 판정 | 다음 실행 때 자수 | **한다** (10분 무응답) |
 | 여러 PC·업체를 한눈에 | 못 한다 | **한다** |
@@ -71,6 +73,7 @@
 
 | 결정 (사용자 확정 09-28) | |
 | --- | --- |
+| 설정의 원본 (10-07) | **PC 에만 있다.** 서버에는 로그·사용량만 남는다 — 웹은 열 때 PC 에 묻고, 바꾼 값은 명령으로 건넨 뒤 지운다 (사용자 확정 10-07) |
 | 웹에서 바꾸는 설정 | 비밀번호를 뺀 전부. PC 마다 다른 경로(ERPia 위치·엑셀 폴더)도 뺀다 — `REMOTE_KEYS` = `private.clean_settings` |
 | 제어할 수 있는 사람 | admin + 그 업체의 owner (`private.can_control`). viewer 는 보기만 |
 | 일시정지 | **예약만** 멈춘다 (창 [예약] 탭의 [일시정지] 와 같다). 도는 실행은 [RPA 종료] 로 |
@@ -79,12 +82,13 @@
 
 | 표·함수 | |
 | --- | --- |
-| `device_settings` | PC 하나에 한 행. `settings` jsonb + `version`(바뀔 때마다 +1) + `locked_modules`(기능 고정 빌드) + 누가·언제 |
-| `commands` | `start`·`stop`·`pause`·`resume` + 기능 + 보낸 사람. **10분 만료**, `taken_at` 으로 한 번만 간다, 30일 보관 |
+| `commands` | `start`·`stop`·`pause`·`resume` + 기능 + 보낸 사람. **10분 만료**, `taken_at` 으로 한 번만 간다, 30일 보관. 10-07: `settings`(웹이 바꾼 값)·`read_settings`(PC 의 답) — 값은 `payload` 에 **잠깐만**(2분 만료, 건넨 뒤·읽힌 뒤 지움, `mark_lost` 5분이 남은 것을 지움). `payload` 는 열 권한이 없어 표로 못 읽는다 |
 | `private.bind_device` | 빌드 ID + PC 바인딩 판정. `ingest` 에서 떼어 `poll` 과 같이 쓴다 (보안 판정을 두 벌로 두지 않는다) |
-| `poll` | PC 가 부른다. 명령 결과를 받고, PC 에서 고친 설정은 **PC 가 서버 최신판을 받았을 때만** 받는다(웹 쪽이 이긴다), 새 판이면 설정을, 남은 명령을 돌려준다. `last_seen_at` 을 새로 해 웹의 "켜져 있음" 이 된다 |
-| `set_device_settings` | 웹. `base_version` 이 다르면 409 — 그 사이 바뀌었다 |
-| `send_command` | 웹. 못 가져간 명령이 5개면 429 |
+| `poll` | PC 가 부른다. 명령 결과(설정 답 포함)를 받고, 남은 명령을 돌려준다 — `settings` 명령의 값은 건네며 지운다. `last_seen_at` 을 새로 해 웹의 "켜져 있음" 이 된다. 10-07 전 PC 가 보내는 `pushed`·`known_version` 은 받기만 하고 쓰지 않는다 |
+| `set_device_settings(device, settings)` | 웹. 바꾼 키만 `settings` 명령으로. 실행 중 423 |
+| `request_settings` / `take_settings` | 웹. 화면을 열 때 PC 에 묻는다 / 답을 한 번 읽는다(읽으면 지움). 그 업체 사람 누구나 |
+| `send_command` | 웹. 못 가져간 명령이 5개면 429 (설정 명령도 같이 센다) |
+| 10-07 전 `device_settings` | PC 마다 설정 한 판을 서버가 들고 있었다 — **자료째 지웠다** (`drop table`) |
 
 반응 시간: 프로그램이 켜져 있으면 30초 안, 꺼져 있으면 자동 켜기(최대 5분) + 30초. **PC 전원이 꺼졌거나 로그온 전이면
 켤 수 없다** — UI 자동화에 바탕화면이 필요하다. 원격 [실행] 도 예약 회차처럼 잠긴 화면이면 거절한다.

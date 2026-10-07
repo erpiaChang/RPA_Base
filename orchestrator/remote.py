@@ -1,15 +1,17 @@
-r"""원격 설정·명령 (09-28, 사용자 요청) — 웹에서 바꾼 설정과 [실행]·[중단]·예약 멈춤을 가져온다.
+r"""원격 설정·명령 (09-28, 10-07 개편) — 웹의 설정 보기·바꾸기와 [실행]·[중단]·예약 멈춤을 가져온다.
 
 서버는 PC 를 부르지 않는다. 스레드 하나가 **30초마다** `rpc/poll` 을 부르고, 받은 것은 큐(`inbox`)에 넣기만
 한다. 창(GUI 스레드)이 1초 시계에서 큐를 비워 적용한다 — 이 모듈은 화면도 흐름도 모른다.
 
-| 주고받는 것 | 방향 | |
-| --- | --- | --- |
-| 설정 (`REMOTE_KEYS` 만) | 서버 → PC | 서버 판(`version`)이 PC 가 아는 것보다 새것일 때만 온다 |
-| 설정 | PC → 서버 | 창에서 저장하면 `push()`. **PC 가 서버 최신판을 받은 뒤에만** 서버가 받는다 (웹 쪽이 이긴다) |
-| 명령 `start`·`stop`·`pause`·`resume` | 서버 → PC | 한 번만 온다. 결과는 `done()` → 다음 poll 에 실린다 |
+**설정은 PC 에만 있다** (사용자 확정 10-07). 서버는 설정을 저장하지 않는다 — 명령에 실어 잠깐 건넬 뿐이다.
 
-비밀번호는 오가지 않는다 — `REMOTE_KEYS` 에 없고, 서버도 모르는 키를 거부한다 (`server/schema.sql` 7절).
+| 명령 | | |
+| --- | --- | --- |
+| `read_settings` | 웹이 설정 화면을 열었다 | 창이 `reply_settings()` — 지금 값을 다음 poll 결과에 싣는다 (웹이 한 번 읽으면 서버가 지운다) |
+| `settings` | 웹이 값을 바꿨다 (`REMOTE_KEYS` 만) | 창이 제 설정 파일에 저장한다 (서버는 건넨 뒤 지운다) |
+| `start`·`stop`·`pause`·`resume` | 실행·종료·예약 멈춤/재개 | 결과는 `done()` → 다음 poll 에 실린다 |
+
+비밀번호·경로는 오가지 않는다 — `REMOTE_KEYS` 에 없고, 서버도 모르는 키를 거부한다 (`server/schema.sql` 7절).
 """
 from __future__ import annotations
 
@@ -17,7 +19,6 @@ import json
 import queue
 import threading
 
-from config.settings import LOG_DIR
 from orchestrator.modules import IDS as MODULE_IDS
 from orchestrator.telemetry import _http_post, _server
 from utils.logger import get_logger
@@ -27,18 +28,17 @@ log = get_logger(__name__)
 POLL = "/rest/v1/rpc/poll"
 POLL_SECONDS = 30.0
 RESPONSE_LIMIT = 65536          # 설정이 실린 응답 (서버 check 가 8KB)
-# 마지막으로 **적용한** 서버 판. 다시 켰을 때 이 판에서 이어가야 PC 에서 고친 값이 서버에 받아들여진다
-STATE_PATH = LOG_DIR / "remote_state.json"
 
 # 웹에서 바꿀 수 있는 설정 (사용자 확정 09-28 — 비밀번호 빼고, PC 마다 다른 경로도 뺀다).
-# `server/schema.sql` 의 `private.clean_settings` 와 **같은 목록**이어야 한다 — 모르는 키는 서버가 요청째 거부한다.
+# `server/schema.sql` 의 `private.clean_settings` 와 **같은 목록**이어야 한다 — 모르는 키는 서버가 거부한다.
 REMOTE_KEYS = (
     "run_modules", "auto_run_enabled", "auto_run_mode", "auto_run_times", "auto_run_interval_minutes",
     "collect_sources", "delivery_company", "delivery_box", "logistics_mode", "sales_mode", "hold_exclude_codes",
     "sms_source", "adb_connection", "adb_wireless_address",
 )
 START, STOP, PAUSE, RESUME = "start", "stop", "pause", "resume"
-SETTINGS_EVENT, COMMAND_EVENT = "settings", "command"
+SETTINGS, READ_SETTINGS = "settings", "read_settings"
+SETTINGS_EVENT, READ_EVENT, COMMAND_EVENT = "settings", "read", "command"
 
 
 def from_settings(settings, *, locked_modules: list[str] | None, post=None) -> Remote | None:
@@ -76,7 +76,7 @@ _TEXT_LISTS = {"run_modules": (1, 4, 20, MODULE_IDS), "collect_sources": (1, 2, 
 
 
 def acceptable(key: str, value: object) -> bool:
-    """서버 `private.clean_settings` 가 받는 값인가. 안 받을 값을 올리면 **요청째 400** 이라 PC 에서 먼저 거른다."""
+    """서버 `private.clean_settings` 가 받는 값인가. 안 받을 값을 실으면 **그 답째** 버려져 PC 에서 먼저 거른다."""
     if key in _CHOICES:
         return value in _CHOICES[key]
     if key in _TEXT_LISTS:
@@ -91,11 +91,15 @@ def acceptable(key: str, value: object) -> bool:
     return value is None or (isinstance(value, str) and len(value) <= 50)   # 택배사·박스·무선 주소
 
 
-def _load_version() -> int:
-    try:
-        return int(json.loads(STATE_PATH.read_text(encoding="utf-8")).get("version") or 0)
-    except (OSError, ValueError, AttributeError):
-        return 0                    # 처음이거나 깨졌다 — 서버 판을 그대로 받는다
+def sendable(values: dict) -> dict:
+    """서버에 실을 값 — 원격 키만, 서버가 받는 값만."""
+    picked = {key: normalize(key, values[key]) for key in REMOTE_KEYS if key in values}
+    # 아직 안 고른 값(기본값 없음, 10-02)은 조용히 뺀다
+    for key in [k for k, v in picked.items() if (v is None or v == []) and not acceptable(k, v)]:
+        picked.pop(key)
+    for key in [k for k, v in picked.items() if not acceptable(k, v)]:
+        log.warning("서버가 받지 않는 값이라 싣지 않는다 — %s=%r", key, picked.pop(key))
+    return picked
 
 
 class Remote:
@@ -103,28 +107,22 @@ class Remote:
                  locked_modules: list[str] | None, post=None) -> None:
         self._url, self._anon, self._build, self._machine = url, anon, build, machine
         self._post = post or _http_post
-        # 기능 고정 빌드면 그 기능, 아니면 빈 목록 — 서버가 웹에서 기능 칸을 잠근다
+        # 기능 고정 빌드면 그 기능, 아니면 빈 목록 — 웹이 기능 칸을 잠근다 (설정 답에 실린다)
         self._locked = list(locked_modules or [])
         self.inbox: queue.Queue = queue.Queue()
-        self.version = _load_version()      # 마지막으로 받은 서버 판 (시작은 지난번에 적용한 판)
-        self.unauthorized = False           # 401 — 다른 PC 에 묶였거나 폐기됐다. 더 묻지 않는다
+        # 401 — 다른 PC 에 묶였거나 폐기·업체 중지. 더 묻지 않는다 (창이 서버 확인을 다시 해 새로 만든다)
+        self.unauthorized = False
         self._lock = threading.Lock()
-        self._pushed: dict | None = None
         self._results: list[dict] = []
         self._stop = threading.Event()
-        # 결과·올릴 설정이 생기면 30초를 기다리지 않고 바로 묻는다 — 기다리는 사이 창이 닫히면
-        # 명령 결과가 사라져 웹에 "처리 중" 으로 남았다 (09-28 실기, [중단] 직후 창을 닫음)
+        # 결과가 생기면 30초를 기다리지 않고 바로 묻는다 — 기다리는 사이 창이 닫히면 명령 결과가 사라져
+        # 웹에 "처리 중" 으로 남았다 (09-28 실기, [중단] 직후 창을 닫음). 웹은 설정 답을 기다린다
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
 
     # ---------------------------------------------------------------- 창이 부른다
-    def start(self, initial: dict | None = None) -> None:
-        """스레드를 띄운다. 첫 poll 은 곧바로 — 켜자마자 웹 설정을 받는다.
-
-        `initial` 은 지금 PC 의 설정이다. 서버에 아직 판이 없으면(새 빌드) 그것이 첫 판이 된다.
-        """
-        if initial is not None:
-            self.push(initial)
+    def start(self) -> None:
+        """스레드를 띄운다. 첫 poll 은 곧바로 — 켜자마자 쌓인 명령을 받는다."""
         self._thread = threading.Thread(target=self._loop, daemon=True, name="remote")
         self._thread.start()
 
@@ -132,35 +130,17 @@ class Remote:
         self._stop.set()
         self._wake.set()
 
-    def push(self, values: dict) -> None:
-        """창에서 저장한 값을 다음 poll 에 싣는다. 원격 키만, 서버가 받을 값만."""
-        picked = {key: normalize(key, values[key]) for key in REMOTE_KEYS if key in values}
-        if self._locked:
-            picked.pop("run_modules", None)
-        # 아직 안 고른 값(기본값 없음, 10-02)은 조용히 뺀다 — 고를 값에 빈 값을 올리면 서버가 요청째 400 이다
-        for key in [k for k, v in picked.items() if (v is None or v == []) and not acceptable(k, v)]:
-            picked.pop(key)
-        refused = [key for key, value in picked.items() if not acceptable(key, value)]
-        for key in refused:
-            log.warning("서버가 받지 않는 값이라 올리지 않는다 — %s=%r", key, picked.pop(key))
-        if not picked:
-            return
-        with self._lock:
-            self._pushed = {**(self._pushed or {}), **picked}
-        self._wake.set()
-
     def done(self, command_id: int, result: str) -> None:
         with self._lock:
             self._results.append({"id": command_id, "result": str(result)[:200]})
         self._wake.set()
 
-    def applied(self, version: int) -> None:
-        """창이 그 판의 설정을 **적용한 뒤** 부른다. 다시 켰을 때 이 판에서 이어간다."""
-        try:
-            STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            STATE_PATH.write_text(json.dumps({"version": int(version)}), encoding="utf-8")
-        except OSError as exc:
-            log.warning("원격 판을 기록하지 못했다 (다시 켜면 서버 판을 새로 받는다): %s", exc)
+    def reply_settings(self, command_id: int, values: dict) -> None:
+        """웹이 물은 지금 설정을 다음 poll 에 싣는다 — 원격 키만(비밀번호·경로 없음). 서버는 웹이 읽으면 지운다."""
+        with self._lock:
+            self._results.append({"id": command_id, "result": "보냄", "settings": _jsonable(sendable(values)),
+                                  "locked_modules": self._locked or None})
+        self._wake.set()
 
     # ---------------------------------------------------------------- 스레드
     def _loop(self) -> None:
@@ -174,11 +154,8 @@ class Remote:
 
     def poll_once(self) -> None:
         with self._lock:
-            pushed, results = self._pushed, list(self._results)
-        payload = {"device_key": self._build, "machine": self._machine,
-                   "known_version": self.version, "locked_modules": self._locked}
-        if pushed:
-            payload["pushed"] = _jsonable(pushed)
+            results = list(self._results)
+        payload = {"device_key": self._build, "machine": self._machine}
         if results:
             payload["results"] = results
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -192,34 +169,29 @@ class Remote:
             self.unauthorized = True
             return
         if not 200 <= status < 300:
-            # 400 이면 올린 설정이 틀렸다 — 같은 것을 또 보내지 않는다 (명령은 계속 받아야 한다)
+            # 400 이면 실은 결과가 틀렸다 — 같은 것을 또 보내지 않는다 (명령은 계속 받아야 한다)
             log.warning("원격 확인 — 서버 응답 %s: %s", status, text[:200])
             if status == 400:
                 with self._lock:
-                    self._pushed = None
+                    self._results = self._results[len(results):]
             return
         data = json.loads(text or "{}")          # 못 읽으면 예외 — 보낸 것을 지우지 않고 다음에 다시 보낸다
         with self._lock:
-            # 보낸 것만 지운다 — 보내는 사이 새로 들어온 결과·설정은 남긴다
-            self._results = self._results[len(results):]
-            if self._pushed is pushed:
-                self._pushed = None
+            self._results = self._results[len(results):]    # 보낸 것만 — 보내는 사이 새로 들어온 결과는 남긴다
         self._take(data)
 
     def _take(self, data: dict) -> None:
-        version = int(data.get("version") or 0)
-        settings = data.get("settings")
-        if isinstance(settings, dict) and version > self.version:
-            picked = {key: normalize(key, settings[key]) for key in REMOTE_KEYS if key in settings}
-            # 판은 설정이 비어 있어도 넘긴다 — 창이 적용하고 `applied()` 로 기록한다
-            self.inbox.put((SETTINGS_EVENT, picked, version))
-        self.version = max(self.version, version)
         for command in data.get("commands") or []:
-            kind = command.get("kind")
-            if kind not in (START, STOP, PAUSE, RESUME):
-                continue
-            log.info("원격 명령 받음 — %s (id %s)", kind, command.get("id"))
-            self.inbox.put((COMMAND_EVENT, int(command["id"]), kind, list(command.get("modules") or [])))
+            kind, command_id = command.get("kind"), int(command["id"])
+            log.info("원격 명령 받음 — %s (id %s)", kind, command_id)
+            if kind == SETTINGS:
+                values = command.get("settings") or {}
+                picked = {key: normalize(key, values[key]) for key in REMOTE_KEYS if key in values}
+                self.inbox.put((SETTINGS_EVENT, command_id, picked))
+            elif kind == READ_SETTINGS:
+                self.inbox.put((READ_EVENT, command_id))
+            elif kind in (START, STOP, PAUSE, RESUME):
+                self.inbox.put((COMMAND_EVENT, command_id, kind, list(command.get("modules") or [])))
 
 
 def _jsonable(values: dict) -> dict:

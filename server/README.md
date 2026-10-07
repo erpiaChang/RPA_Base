@@ -27,7 +27,7 @@ SQL Editor → New query → `server/schema.sql` **전체**를 붙여 넣고 Run
 select tablename, rowsecurity from pg_tables where schemaname = 'public';        -- 전부 true
 select jobname, schedule from cron.job;                                         -- rpa_mark_lost / rpa_purge_old / rpa_send_alerts(1분, 10-02) / rpa_expire_questions(1분) / rpa_refresh_usage(10분)
 select n.nspname, proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
- where n.nspname in ('public', 'private');                                      -- public: ingest, register_build, revoke_device, mark_lost, purge_old, send_alerts, poll, send_command, set_device_settings, ask_question, llm_online, llm_take, llm_write, expire_questions, refresh_usage / private: is_admin, my_account_ids, can_control, clean_settings, bind_device, llm_worker …
+ where n.nspname in ('public', 'private');                                      -- public: ingest, register_build, revoke_device, mark_lost, purge_old, send_alerts, poll, send_command, set_device_settings, request_settings, take_settings, suspend_account, resume_account, ask_question, llm_online, llm_take, llm_write, expire_questions, refresh_usage / private: is_admin, my_account_ids, can_control, clean_settings, bind_device, llm_worker …
 ```
 
 Database → Advisors → Security 를 한 번 돌린다. **`public.ingest` 를 anon 이 부를 수 있다는 경고 하나는 정상**이다
@@ -124,23 +124,25 @@ curl -X POST "https://<ref>.supabase.co/rest/v1/rpc/ingest" ^
 ## 7. 권한·RLS 시험 (10-07)
 
 `server/tests/rls_check.sql` — 가짜 두 업체·사용자로 남의 업체 읽기·anon 표 읽기·표 직접 쓰기·잘못된 빌드 ID·다른 PC·제어 RPC·
-업체 중지(적용돼 있으면)를 **실제로 거부시켜** 본다. 확인 도구는 schema.sql 글자만 대조하므로 정책이 실제로 막는지는 이것으로 본다.
+업체 중지(적용돼 있으면)를 **실제로 거부시켜** 보고, 설정 주고받기(웹 요청 → PC 답 → 한 번만 읽힘 · 건넨 값·읽힌 답이 서버에 안 남음 ·
+비밀번호 키가 실린 답은 버림, 10-07)를 한 바퀴 돌린다. 확인 도구는 schema.sql 글자만 대조하므로 정책이 실제로 막는지는 이것으로 본다.
 한 DO 블록(한 트랜잭션)이고 **끝에서 일부러 예외를 던져 전부 되돌린다.** 결과는 오류 문구다: `RLS_CHECK_OK n/n (되돌림)` 이면 통과,
 `RLS_CHECK_FAIL` 이면 줄마다 어디가 틀렸는지 나온다. 스키마·정책·권한을 고쳐 적용한 뒤마다 한 번 돌린다.
 실서버에 쓰는 SQL 이라 사용자에게 보인 뒤 본문 첫 줄에 `-- APPROVED-SQL: ...` 을 붙인다. 운영 시간대는 피한다 (수 초 행 잠금).
 
 ## 8. 업체 단위 중지 (10-07)
 
-`select public.suspend_account('<업체 id>');` — 그 업체의 모든 빌드가 다음 보고·poll 에서 401 이라 실행 창이 잠기고, 그 업체 owner 의
-웹 [실행]·설정 저장은 403. 읽기·자료·빌드는 그대로라 `select public.resume_account('<업체 id>');` 로 되돌린다. SQL 로만 부른다
-(관리자 화면 없음). 중지 중 끊긴 실행은 10분 뒤 `lost` 로 바뀌고 알림 메일이 갈 수 있다.
-★ **재개 뒤에는 그 업체의 각 PC 에서 RPA 를 한 번 껐다 켜야 한다** — 401 을 받은 실행 창은 폐기와 같이 보고 다시 묻지 않는다
-(`gui/run_app.py` 서버 확인 BLOCKED·`orchestrator/remote.py` poll 401). 끄지 않으면 창은 떠 있는데 예약이 돌지 않는다.
+웹 관리자: [PC] 탭 → 위쪽에서 업체를 고른다 → [업체 사용] 의 [이 업체 RPA 중지] / [중지 풀기] (확인 창 뒤). SQL 로는
+`select public.suspend_account('<업체 id>');` / `select public.resume_account('<업체 id>');` — 두 함수는 안에서 관리자인지 본다.
+중지하면 그 업체의 모든 빌드가 다음 보고·poll(30초 안)에서 401 이라 실행 창이 잠기고(도는 실행은 끝까지 간다), 그 업체 owner 의
+웹 [실행]·설정 저장은 403. 읽기·자료·빌드는 그대로다. 중지 중 끊긴 실행은 10분 뒤 `lost` 로 바뀌고 알림 메일이 갈 수 있다.
+풀면 잠긴 실행 창이 **10분 안에** 서버 확인을 다시 해 풀린다 (`gui/run_app.py` `VERIFY_BLOCKED_MS`, 10-07 — 그 전에는 껐다 켜야 했다).
 
 ## 지우는 것
 
 180일 지난 `runs`(하위 표 포함)는 매일 03:30(KST, pg_cron 은 UTC 라 SQL 에는 18:30) 에 자동 삭제된다. 그 전에 받으려면 대시보드 [엑셀로 내려받기] (③).
 **사용량 `usage_daily` 는 지우지 않는다** — 과금 근거다 (9절, 10분마다 runs 에서 다시 센다). 사용법 질문은 30일 + 사람당 20개, 원격 명령은 30일.
+**PC 설정은 서버에 남지 않는다** (10-07) — 명령에 실린 값(`commands.payload`)은 건넨 뒤·읽힌 뒤 지우고, 남은 것은 `mark_lost`(5분)가 지운다.
 PC·업체 행은 지우지 말고 `revoke_device` 로 폐기한다 — 지우면 그 PC 의 사용량도 cascade 로 같이 지워진다.
 `ingest` 의 하루 상한(run 50 / 이벤트 2만)도 UTC 날짜 기준이라 KST 09:00 에 바뀐다.
 

@@ -46,9 +46,10 @@ RPA 흐름 3종(수집 / ERPia / 통합)이 구현·검증됐고, 배포는 실�
 | --- | --- |
 | **로그인에 비밀번호 변경 요구 창이 뜬다** (설정 계정, 10-07 실측 — `CONTROLS.md` 로그인 절 `Frm_ChangePassword`) | **고침 (10-07 사용자 확정 — 늘 [다음에 변경하기])**. 강제 변경(단추 없음)이면 멈추고 사람 말로 알린다. 가짜 창(`probe_failure`)으로 확인 |
 | 6·7번 실제 시험 — `tools/test_find_jump` (Ctrl+F 찾기 창·점프 시간·조회 로딩 창) | 위 창이 풀린 뒤 `--launch --yes` (APPROVED-RUN, 화면을 몇 분 쓴다) |
-| 업체 단위 중지 — `server/schema.sql` (`suspended_at`·`bind_device`·`can_control`·`suspend_account`/`resume_account`) | **실서버 미적용.** SQL 을 보이고 결정 → `-- APPROVED-SQL` → 적용 뒤 md5(prosrc) 대조 |
-| RLS 거부 시험 — `server/tests/rls_check.sql` | 실서버 1회 실행 (끝에서 전부 되돌림, APPROVED-SQL). 업체 중지 적용 뒤면 2단계도 돈다 |
-| 웹 [비밀번호 변경] (`#/account`) | 배포 (`deploy_web.bat`, APPROVED-RUN). 실서버 `updateUser`·`signOut({scope:"others"})` 는 미검증 |
+| 업체 단위 중지 — `server/schema.sql` (`suspended_at`·`bind_device`·`can_control`·`suspend_account`/`resume_account`) + **웹 관리자 [PC] 탭 단추** (10-07 사용자 요청) · 풀면 PC 가 10분 안에 다시 확인 | **실서버 미적용.** SQL 을 보이고 결정 → `-- APPROVED-SQL` → 적용 뒤 md5(prosrc) 대조 |
+| **설정은 PC 에만** (10-07 사용자 확정) — 서버 `device_settings` 표를 지우고, 웹은 열 때 PC 에 묻는다(`request_settings`·`take_settings`), 바꾼 값은 `settings` 명령으로 건네고 지운다 | **실서버 미적용** (위와 한 번에). 순서: SQL → 웹 배포 → 빌드 |
+| RLS 거부 시험 — `server/tests/rls_check.sql` | 실서버 1회 실행 (끝에서 전부 되돌림, APPROVED-SQL). 업체 중지 적용 뒤면 2단계도 돈다. 설정 주고받기 한 바퀴도 본다 |
+| ~~웹 [비밀번호 변경] (`#/account`)~~ | **지웠다** (10-07 사용자 확정 — 비밀번호는 프로그램에서만). 웹 로그인 비밀번호는 관리자가 바꾼다 |
 | 빌드로만 볼 수 있는 것 | 다음 빌드에서: 빌드 직후 자가 점검(`--selfcheck`)이 실제로 도는지 · 판 번호가 웹 PC 표에 · 켜는 중 실패 때 알림 창이 PyInstaller 오류 창과 겹치지 않는지 · 관리자/일반 권한 두 벌 막기 |
 | 미검증 (실제 상황이 와야) | 갓 설치 Windows 의 인증서 채우기 · 자동수집 대기 중 ERPia 알림 · 휴대폰 연결 앱의 다른 판 탭 id · 실사이트의 사이트 화면 도우미 |
 | 하지 않음 / 결정 필요 | Windows 샌드박스 시험(이 PC 에 기능이 꺼져 있다 — 켜려면 관리자·재부팅) · 선불 토큰(충전 주체·오프라인 정책) · 관리 도구(범위) · `.bat` 은 이 PC 에서 문제 재현이 안 돼 그대로 두고 실행 검사만 |
@@ -197,7 +198,7 @@ RPA 흐름 3종(수집 / ERPia / 통합)이 구현·검증됐고, 배포는 실�
 | **개발 설정에 빌드 ID 가 들어가면 probe 가 실서버로 보고하고, 그 빌드를 개발 PC 에 묶는다** (09-23 사고 — 가짜 줄 4건). 실행 창을 띄우는 probe 는 `probe_guard.offline()` 안에서 돈다. 빌드 뒤 개발 설정의 `server_build_id` 는 비워 둔다 | `tools/probe_guard.py` |
 | `dist/run` 에 `settings.local.json` 을 미리 두면 **구운 값이 전부 빈 값으로 덮인다** | `docs/BUILD.md` |
 | 스키마 전문을 손으로 옮겨 적는 경로라, 적용 뒤 `md5(prosrc)` 대조로 전사 오류를 확인한다 | 09-28 |
-| **서버에 저장된 그 PC 의 설정이 구운 값을 이긴다** — 이미 등록된 PC 는 새로 구워도 첫 조회에서 서버 값(예: `sms_source=adb`)이 덮는다. 창·웹에서 바꾼다 | `orchestrator/remote.py` (09-29 실측) |
+| ~~서버에 저장된 그 PC 의 설정이 구운 값을 이긴다~~ → **10-07 해소: 서버가 설정을 저장하지 않는다** (사용자 확정). 대신 웹은 PC 가 켜져 있을 때만 그 PC 설정을 보고 바꾼다. 순서는 SQL(7절 개편) → 웹 → 빌드 — 새 웹은 옛 서버에 `request_settings` 가 없어 설정을 못 본다 | `orchestrator/remote.py`, `server/schema.sql` 7절 |
 
 ### 화면·자동화
 

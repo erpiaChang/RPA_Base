@@ -85,9 +85,11 @@ def main() -> int:
     sent = set(re.findall(r"\bout\.(\w+) =", app))
     out.append(check("★ 웹이 올리는 설정 키 = PC·서버의 원격 키 (비밀번호 없음)", sent == set(remote.REMOTE_KEYS),
                      f"웹만 {sorted(sent - set(remote.REMOTE_KEYS))} / 빠짐 {sorted(set(remote.REMOTE_KEYS) - sent)}"))
-    out.append(check("쓰기는 RPC 셋으로만 (표에 직접 쓰지 않는다) + 읽기 RPC llm_online",
+    out.append(check("쓰기는 RPC 로만 (표에 직접 쓰지 않는다) — 명령·설정·질문·업체 중지 + 읽기 RPC (10-07)",
                      set(re.findall(r'sb\.rpc\("(\w+)"', app))
-                     == {"send_command", "set_device_settings", "ask_question", "llm_online"}
+                     == {"send_command", "set_device_settings", "request_settings", "take_settings", "ask_question",
+                         "llm_online"}
+                     and set(re.findall(r'"(suspend_account|resume_account)"', app)) == {"suspend_account", "resume_account"}
                      and not re.search(r"\.(insert|update|upsert|delete)\(", app)))
     out.append(check("★ 실행·중단은 확인 창을 거친다", "window.confirm(ask)" in app and "start:" in app and "stop:" in app))
     out.append(check("제어 단추는 관리자·그 업체 owner 에게만", 'm.role === "owner" && m.account_id === accId' in app))
@@ -103,6 +105,41 @@ def main() -> int:
                      "r.state = 'running'" in body and "PT423" in body
                      and "settings.setRunning(!!(run && run.length))" in app
                      and 'error.code === "PT423"' in app and "RUNNING_LOCK_TEXT" in app))
+
+    log.info("▶ 설정은 PC 에만 (10-07 사용자 확정) — 서버는 저장하지 않고 건넨다")
+    out.append(check("★ 웹은 서버의 설정 표를 읽지 않는다 — 열 때 PC 에 묻고(request_settings) 한 번 읽는다(take_settings)",
+                     not re.search(r"(?<!set_)device_settings", app) and 'sb.rpc("request_settings", { device: deviceId })' in app
+                     and 'sb.rpc("take_settings", { command: id })' in app and "if (!section.isConnected) return;" in app))
+    out.append(check("★ 서버 — 설정 표가 없고, 설정 값(payload)은 열 권한에서 빠지고, 건넨 뒤·읽힌 뒤 지운다",
+                     "drop table if exists public.device_settings;" in schema
+                     and "create table if not exists public.device_settings" not in schema
+                     and "grant select (id, account_id, device_id, kind, modules, created_by, created_at, expires_at, taken_at, done_at, result)" in schema
+                     and "update public.commands c set taken_at = now(), payload = null" in schema
+                     and "update public.commands c set payload = null where c.id = v_cmd.id;" in schema
+                     and "update public.commands set payload = null" in schema))
+    out.append(check("웹은 바꾼 키만 보낸다 (그 사이 PC 에서 고친 다른 값을 덮지 않게) · 명령 기록은 설정 값 열을 고르지 않는다",
+                     "const changed = Object.fromEntries(Object.entries(values).filter(([k, v]) => !same(v, s[k])));" in app
+                     and 'select("id, kind, modules, created_by, created_at, taken_at, result")' in app
+                     and '.neq("kind", "read_settings")' in app))
+    out.append(check("PC 가 꺼져 있으면 묻지 않는다 · 2분 안에 답이 없으면 알린다",
+                     "if (!online()) {" in app and 'got.error === "expired"' in app))
+    out.append(check("★ 웹에서 비밀번호를 바꾸지 않는다 — 본인 비밀번호 화면을 지웠다 (10-07 사용자 확정)",
+                     "updateUser" not in app and "pwBtn" not in app + html and 'page === "account"' not in app
+                     and "renderAccount" not in app))
+
+    log.info("▶ 업체 단위 중지 (10-07) — 관리자만, 웹 PC 탭")
+    suspend = schema[schema.find("function public.suspend_account"):]
+    suspend = suspend[:suspend.find("$$;")]
+    out.append(check("★ 관리자만 — 단추는 isAdmin 에서만, 서버 함수는 안에서 is_admin 검사 + authenticated 만 실행",
+                     "if (isAdmin && accountId) main.append(suspendSection(accountId));" in app
+                     and "not private.is_admin()" in suspend
+                     and "grant execute on function public.suspend_account(uuid) to authenticated;" in schema
+                     and "grant execute on function public.resume_account(uuid) to authenticated;" in schema
+                     and "revoke execute on function public.suspend_account(uuid) from public, anon;" in schema))
+    out.append(check("중지·해제는 확인 창을 거치고, 그 업체 사람에게는 중지 안내",
+                     "if (!window.confirm(ask)) return;" in app[app.find("function suspendSection"):]
+                     and "SUSPENDED_TEXT" in app
+                     and 'select("id, name, suspended_at")' in app))
 
     log.info("▶ 매출처리 방식·실행 상세 자동 갱신 (10-01)")
     from automation.order_mapping import SALES_MODES
@@ -153,7 +190,7 @@ def main() -> int:
 
     log.info("▶ 검토 반영 (09-28)")
     out.append(check("불러오는 사이 화면을 옮기면 늦게 온 결과를 붙이지 않는다 (PC·실행 상세)",
-                     app.count("if (!head.isConnected) return;") == 2 and "if (save.isConnected) renderDevice(" in app))
+                     app.count("if (!head.isConnected) return;") == 2 and "if (!box.isConnected) return;" in app))
     # 화면에 'null' 글자가 실제로 찍히는지는 probe_web_shot 이 본다 (h() 안의 null 은 h() 가 거른다)
     out.append(check("PC 화면 머리는 빈 자리를 걸러서 append 한다 ('null' 글자 방지)",
                      "control ? null : h(" in app and ".filter(Boolean));" in app))
@@ -214,20 +251,6 @@ def main() -> int:
     out.append(check("세션은 sessionStorage (탭 닫으면 끝) + 로그아웃 + 만료 처리",
                      "sessionStorage" in app and "signOut" in app and "SIGNED_OUT" in app))
     out.append(check("가입 없음 — signUp 을 부르지 않는다", "signUp" not in app))
-    log.info("▶ 본인 비밀번호 바꾸기 (#/account, 10-07)")
-    out.append(check("현재 비밀번호로 다시 확인 → updateUser → 다른 곳의 로그인 끊기(scope others)",
-                     app.count("signInWithPassword") >= 2 and "auth.updateUser({ password" in app
-                     and 'signOut({ scope: "others" })' in app))
-    out.append(check("입력칸 — 현재는 current-password, 새 것은 new-password, 모두 type password",
-                     'id: "pwCur", type: "password", autocomplete: "current-password"' in app
-                     and app.count('autocomplete: "new-password"') == 2))
-    out.append(check("비밀번호 값이 console 로 새지 않는다",
-                     not re.search(r"console\.\w+\([^)]*\b(cur|nw|nw2|pw|password)\b", app)))
-    out.append(check("[비밀번호 변경] 단추는 숨긴 채 시작하고 로그인하면 보인다, 화면은 탭 분기보다 앞",
-                     '<button id="pwBtn" class="hidden">' in html and 'getElementById("pwBtn").classList.toggle' in app
-                     and 0 <= app.find('page === "account"') < app.find('page === "device"')))
-    out.append(check("새 비밀번호 길이 8~72 — 상한은 서버처럼 바이트로 센다 (한글 3바이트)",
-                     "PW_MIN = 8, PW_MAX = 72" in app and "new TextEncoder().encode(nw).length > PW_MAX" in app))
     # wrangler 배포 (09-28): 이름이 주소다. README·설정 파일은 올리지 않는다
     wrangler = (WEB / "wrangler.jsonc").read_text(encoding="utf-8")
     out.append(check("wrangler.jsonc — 이름 rpa-dashboard, 올리는 폴더 build/web (자리표시를 채운 것)",

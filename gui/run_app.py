@@ -88,6 +88,7 @@ SALES_HELP = ("전체는 [매출처리] 단추로 화면에 조회되지 않은 
 # 매출처리 방식 라디오 글 (값은 `order_mapping.SALES_MODES`)
 SALES_LABELS = {order_mapping.SALES_ALL: "전체 매출처리", order_mapping.SALES_SELECTED: "선택주문 매출처리"}
 VERIFY_RETRY_MS = 60 * 1000     # 서버 확인이 네트워크로 실패하면 이 주기로 다시 (09-28)
+VERIFY_BLOCKED_MS = 10 * 60 * 1000   # 거부된 뒤에도 이 주기로 다시 — 업체 중지를 풀면 껐다 켜지 않아도 돈다 (10-07)
 VERIFY_KEY = "이 PC 의 서버 확인"  # `_values` 의 항목 이름 — 확인 전·거부면 [실행] 이 잠긴다
 DRAIN_LIMIT = 20                # 1초 시계 한 번에 적용할 원격 이벤트 상한 (09-28)
 
@@ -242,8 +243,6 @@ class RunWindow(ErpiaWindow):
         self.remote: remote.Remote | None = None
         self.remote_run = False                 # 지금 회차가 웹의 [실행] 으로 시작됐다
         self._pending_remote: dict | None = None    # 실행 중에 받은 웹 설정 — 끝나면 적용한다
-        self._pending_version = 0                   # 그 설정의 서버 판
-        self._remote_seen: dict | None = None       # 서버와 맞춘 마지막 값 — 바뀐 것만 올린다
         # 자동 켜기 (09-28). 빌드본(exe)에서만 — 개발 중에 python 을 등록하지 않는다
         self.frozen = bool(getattr(sys, "frozen", False))
         self.autostart_var = tk.BooleanVar(value=bool(getattr(SETTINGS, "auto_start", None)))
@@ -362,6 +361,9 @@ class RunWindow(ErpiaWindow):
         self._verify_result = None
         state, text = result
         if state == telemetry.VERIFY_OK:
+            reporter = getattr(self, "_reporter_obj", None)
+            if reporter is not None:
+                reporter.unauthorized = False       # 거부됐다가 풀렸다 (업체 중지 해제) — 다시 잠그지 않게
             self._set_verify("", "")
             log.info("서버 확인 통과")
             if not self._missing():                 # 비어 있는 값이 있으면 '입력 필요' 를 그대로 둔다
@@ -371,6 +373,7 @@ class RunWindow(ErpiaWindow):
         if state == telemetry.VERIFY_BLOCKED:
             log.warning("서버가 이 PC 를 거부했다: %s", text)
             self._set_verify("blocked", text)
+            self.root.after(VERIFY_BLOCKED_MS, self._verify_build)
             return
         log.warning("서버 확인 실패(다시 시도): %s", text)
         self._set_verify("pending", text)
@@ -934,7 +937,6 @@ class RunWindow(ErpiaWindow):
             return
         self.saved_var.set(f"저장했습니다 {time.strftime('%H:%M:%S')}"
                            + (" · 빈 칸은 저장하지 않음" if blank else ""))
-        self._push_remote()
 
     def _on_close(self) -> None:
         """창을 닫는다 — 모아 둔 저장이 있으면 먼저 쓴다. 저장이 터져도 창은 닫는다."""
@@ -1126,7 +1128,6 @@ class RunWindow(ErpiaWindow):
         except OSError as exc:
             # 저장에 실패해도 이번 실행에는 반영돼 있다. 조용히 넘기지 않는다.
             log.warning("자동 실행 설정을 저장하지 못했다: %s", exc)
-        self._push_remote()
 
     def _toggle_autorun_pause(self) -> None:
         if self.autorunner is not None:
@@ -1157,8 +1158,9 @@ class RunWindow(ErpiaWindow):
     def _lock_if_unauthorized(self) -> None:
         """보고가 401 로 거부되면 [실행] 을 잠근다 (09-28).
 
-        빌드 ID 가 폐기됐거나 이 빌드가 다른 PC 에 묶인 것이다. 어느 쪽이든 사용자가 풀 수 없으므로
-        다시 시도하지 않고 잠근다. 실행 중에는 건드리지 않는다 — 돌던 회차는 끝까지 간다.
+        빌드 ID 가 폐기됐거나, 다른 PC 에 묶였거나, 업체가 중지됐다. 사용자가 풀 수 없으므로 잠그고,
+        서버 확인만 `VERIFY_BLOCKED_MS` 마다 다시 한다 (업체 중지를 풀면 풀린다, 10-07). 실행 중에는 건드리지
+        않는다 — 돌던 회차는 끝까지 간다.
         """
         reporter = getattr(self, "_reporter_obj", None)
         refused = (bool(reporter is not None and getattr(reporter, "unauthorized", False))
@@ -1167,6 +1169,7 @@ class RunWindow(ErpiaWindow):
             return
         log.warning("서버가 이 PC 를 거부했다 (401). 실행을 잠근다.")
         self._set_verify("blocked", "이 프로그램은 이 PC 에서 쓸 수 없습니다. 관리자에게 문의하세요.")
+        self.root.after(VERIFY_BLOCKED_MS, self._verify_build)
 
     def _slot_ids(self, planned: float) -> list[str] | None:
         """그 예약 차례의 기능 id (실행 순서). 같은 시각에 걸린 줄은 합친다 (09-21).
@@ -1407,8 +1410,6 @@ class RunWindow(ErpiaWindow):
             self._fail_no_erpia()
             return
         super()._begin_run(start_step)      # 홈으로 옮기고 다른 탭을 잠그는 것은 `_set_busy`
-        if self.busy:
-            self._push_remote()             # [실행] 이 방금 저장한 값을 서버에도 (바뀐 것이 있을 때만)
 
     def _trigger(self) -> str:
         if self.resume_run:
@@ -1434,26 +1435,17 @@ class RunWindow(ErpiaWindow):
                 self._update_run_state()
 
     def _start_remote(self) -> None:
-        """서버 확인을 통과하면 원격 확인을 켠다 — 30초마다 웹 설정·명령을 가져온다."""
-        if self.remote is not None:
+        """서버 확인을 통과하면 원격 확인을 켠다 — 30초마다 웹 명령(설정 보기·바꾸기 포함)을 가져온다.
+        401 로 멈춘 것(업체 중지 뒤 재개 등)은 새로 만든다."""
+        if self.remote is not None and not self.remote.unauthorized:
             return
+        if self.remote is not None:
+            self.remote.close()
         self.remote = remote.from_settings(SETTINGS, locked_modules=self.locked_modules)
         if self.remote is None:
             return
-        self._remote_seen = remote.snapshot(SETTINGS)
-        # 서버에 아직 판이 없으면(새 빌드) 지금 값이 첫 판이 된다. 있으면 서버가 이것을 버리고 제 판을 준다
-        self.remote.start(initial=self._remote_seen)
-        log.info("원격 확인 켜짐 — %d초마다 웹 설정·명령을 가져온다", int(remote.POLL_SECONDS))
-
-    def _push_remote(self) -> None:
-        if self.remote is None:
-            return
-        now = remote.snapshot(SETTINGS)
-        changed = {key: value for key, value in now.items()
-                   if (self._remote_seen or {}).get(key) != value}
-        if changed:
-            self.remote.push(changed)
-            self._remote_seen = now
+        self.remote.start()
+        log.info("원격 확인 켜짐 — %d초마다 웹 명령을 가져온다", int(remote.POLL_SECONDS))
 
     def _drain_remote(self) -> None:
         """1초 시계에서. 받은 설정·명령을 **GUI 스레드에서** 적용한다 (원격 스레드는 큐에 넣기만 한다)."""
@@ -1464,10 +1456,15 @@ class RunWindow(ErpiaWindow):
                 event = self.remote.inbox.get_nowait()
             except queue.Empty:
                 break
-            if event[0] == remote.SETTINGS_EVENT:
-                self._pending_remote = {**(self._pending_remote or {}), **event[1]}
-                self._pending_version = event[2]
-                self._apply_pending_remote()
+            if event[0] == remote.READ_EVENT:
+                # 웹이 설정 화면을 열었다 — 지금 값(실행 뒤 적용할 웹 값 포함)을 답한다. 서버는 웹이 읽으면 지운다
+                self.remote.reply_settings(event[1], {**remote.snapshot(SETTINGS), **(self._pending_remote or {})})
+            elif event[0] == remote.SETTINGS_EVENT:
+                _kind, command_id, values = event
+                self._pending_remote = {**(self._pending_remote or {}), **values}
+                applied = self._apply_pending_remote()
+                self.remote.done(command_id, "실행 중이라 끝난 뒤 적용한다" if self.busy
+                                 else f"적용함 — {applied}개 바뀜" if applied else "바뀐 것이 없다")
             else:
                 _kind, command_id, kind, wanted = event
                 try:
@@ -1480,24 +1477,18 @@ class RunWindow(ErpiaWindow):
                 self.remote.done(command_id, result)
         self._apply_pending_remote()                # 실행 중에 받아 둔 것 — 끝났으면 지금
 
-    def _apply_pending_remote(self) -> None:
-        """웹 설정을 적용한다. **실행 중이면 끝날 때까지 미룬다** — 도는 회차의 값을 중간에 바꾸지 않는다."""
+    def _apply_pending_remote(self) -> int:
+        """웹 설정을 이 PC 설정 파일에 저장한다. **실행 중이면 끝날 때까지 미룬다** — 도는 회차의 값을 중간에
+        바꾸지 않는다. 바뀐 키 수를 돌려준다 (미뤘으면 0)."""
         if self._pending_remote is None or self.busy:
-            return
+            return 0
         values, self._pending_remote = self._pending_remote, None
         if self.locked_modules is not None:
-            values.pop("run_modules", None)
+            values.pop("run_modules", None)         # 기능 고정 빌드 — 서버는 빌드 구성을 모른다
         changed = {key: value for key, value in values.items()
                    if remote.normalize(key, getattr(SETTINGS, key, None)) != value}
-        self._remote_seen = {**(self._remote_seen or {}), **values}
-        if self.remote is not None:
-            self.remote.applied(self._pending_version)     # 다시 켜면 이 판에서 이어간다
-            # 서버 판에 없는 키(새로 생긴 설정 — 10-01 매출처리 방식)는 이 PC 값으로 채워 올린다. 받은 값은 되올리지 않는다
-            missing = {key: value for key, value in remote.snapshot(SETTINGS).items() if key not in values}
-            if missing:
-                self.remote.push(missing)
         if not changed:
-            return
+            return 0
         log.info("웹에서 바꾼 설정을 받았다 — %s", ", ".join(sorted(changed)))
         try:
             save_local(**changed)
@@ -1507,9 +1498,10 @@ class RunWindow(ErpiaWindow):
                 setattr(SETTINGS, key, value)
         self._show_settings(changed)
         self.status_var.set("웹에서 바꾼 설정을 받았습니다.")
+        return len(changed)
 
     def _show_settings(self, changed: dict) -> None:
-        """바뀐 설정을 화면 칸에 옮긴다. 칸을 바꿔도 저장·서버 올리기는 일어나지 않는다."""
+        """바뀐 설정을 화면 칸에 옮긴다. 칸을 바꿔도 다시 저장되지 않는다."""
         if "run_modules" in changed:
             chosen = set(SETTINGS.run_modules or [])
             for key, var in self.module_vars.items():

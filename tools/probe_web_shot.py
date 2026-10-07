@@ -40,7 +40,7 @@ FAKE = r"""
   const D1 = "d1000000-0000-0000-0000-000000000001", D2 = "d2000000-0000-0000-0000-000000000002", D3 = "d3000000-0000-0000-0000-000000000003";
   const now = Date.now(), iso = ms => new Date(ms).toISOString(), ago = s => iso(now - s * 1000);
   const kst = d => new Date(d.getTime() + 9 * 3600000).toISOString().slice(0, 10);
-  const accounts = [{ id: A, name: "업체A" }, { id: B, name: "업체B" }];
+  const accounts = [{ id: A, name: "업체A", suspended_at: null }, { id: B, name: "업체B", suspended_at: ago(86400) }];
   const devices = [
     { id: D1, account_id: A, name: "PC-A", last_seen_at: ago(20), next_run_at: iso(now + 3600e3), auto_run_enabled: true, paused: false, app_version: "2026.09.22" },
     { id: D2, account_id: A, name: "PC-B", last_seen_at: ago(3 * 86400), auto_run_enabled: false, paused: false, app_version: "2026.09.22" },
@@ -77,11 +77,12 @@ FAKE = r"""
     answer: i % 2 ? "PC 가 30초 안에 받습니다. 실행 중이면 끝난 뒤 적용됩니다." : long, status: i === qn - 1 && window.__LAST_FAILED ? "expired" : "done" });
   const members = { admin: [{ account_id: null, role: "admin" }], owner: [{ account_id: A, role: "owner" }] };
   const tables = { accounts, devices, usage_daily: usage, runs, run_steps: steps, run_logs: logs, run_attention: [{ run_id: "r-fail", seq: 1, text: "물류관리 화면을 확인하세요" }],
-                   questions, commands: [{ id: 1, device_id: D1, kind: "start", modules: ["mail"], created_at: ago(3600), created_by: "admin@example.com", result: "끝남" }],
-                   device_settings: [{ device_id: D1, version: 3, updated_by: "PC", updated_at: ago(3600), locked_modules: null,
-                     settings: { run_modules: ["mail", "orders", "logistics_wait", "logistics"], collect_sources: ["excel", "site"], delivery_company: "택배사A", delivery_box: "박스A",
-                                 logistics_mode: "자동", hold_exclude_codes: [], sms_source: "phonelink", adb_connection: "usb", auto_run_enabled: true, auto_run_mode: "daily",
-                                 auto_run_times: ["평일 09:00 mail,orders"], auto_run_interval_minutes: 60 } }] };
+                   questions, commands: [{ id: 1, device_id: D1, kind: "start", modules: ["mail"], created_at: ago(3600), created_by: "admin@example.com", result: "끝남" }] };
+  // 설정은 서버 표에 없다 (10-07) — PC 의 답(take_settings)으로만 온다
+  const SNAP = { locked_modules: null,
+    settings: { run_modules: ["mail", "orders", "logistics_wait", "logistics"], collect_sources: ["excel", "site"], delivery_company: "택배사A", delivery_box: "박스A",
+                logistics_mode: "자동", sales_mode: "전체", hold_exclude_codes: [], sms_source: "phonelink", adb_connection: "usb", auto_run_enabled: true,
+                auto_run_mode: "daily", auto_run_times: ["평일 09:00 mail,orders"], auto_run_interval_minutes: 60 } };
   const role = window.__ROLE || "none";
   const visible = (name, row) => {                   // RLS 흉내 — 업체 사용자는 자기 업체만
     if (role !== "owner") return true;
@@ -119,15 +120,19 @@ FAKE = r"""
   }
   const session = role === "none" ? null : { user: { id: "u-1", email: role === "admin" ? "admin@example.com" : "owner@a.example" } };
   window.supabase = { createClient: () => ({
-    // 비밀번호 바꾸기 시험 (10-07): window.__PW 와 같으면 로그인 통과, updateUser·signOut 은 받은 값을 남긴다
     auth: { getSession: async () => ({ data: { session } }),
-            signInWithPassword: async ({ password }) => password && password === window.__PW
-              ? { data: { session }, error: null } : { error: { message: "x", status: 400 } },
-            updateUser: async ({ password }) => { window.__UPDATED = password; return { data: {}, error: null }; },
-            signOut: async (opts) => { window.__SIGNOUT = (opts && opts.scope) || "local"; return { error: null }; },
+            signInWithPassword: async () => ({ error: { message: "x", status: 400 } }),
+            signOut: async () => ({ error: null }),
             onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }) },
     from: name => new Q(name),
-    rpc: async (name) => name === "llm_online" ? { data: true, error: null } : { data: 1, error: null },
+    // 부른 RPC 를 window.__RPC 에 남긴다 — 무엇을 보냈는지 시험이 본다
+    rpc: async (name, args) => {
+      (window.__RPC = window.__RPC || []).push([name, args]);
+      if (name === "llm_online") return { data: true, error: null };
+      if (name === "request_settings") return { data: 77, error: null };
+      if (name === "take_settings") return { data: JSON.parse(JSON.stringify(SNAP)), error: null };
+      return { data: 1, error: null };
+    },
     members,
   }) };
   // account_members 는 역할에 따라
@@ -246,46 +251,57 @@ def main() -> int:
             out.append(check("사용량 카드 숫자가 카드 밖으로 넘치지 않는다", over == 0, f"{over}개 넘침"))
             page.close()
 
-            log.info("▶ 비밀번호 바꾸기 (#/account, 10-07)")
-            page = shoot(browser, "16_owner_account", "owner", "#/home", DESKTOP, errors)
-            page.evaluate("window.__PW = 'old-pass-1'")
-            out.append(check("머리줄에 [비밀번호 변경] — 누르면 #/account",
-                             page.is_visible("#pwBtn") and (page.click("#pwBtn") or True)
-                             and page.wait_for_selector("#pwCur") is not None and page.url.endswith("#/account")))
-            out.append(check("입력 셋은 모두 가려진 칸(password)", page.evaluate(
-                "['pwCur','pwNew','pwNew2'].every(i => document.getElementById(i).type === 'password')")))
+            log.info("▶ PC 설정 — 열 때 PC 에 묻고, 바꾼 것만 보낸다 (10-07, 서버에 설정 표 없음)")
+            # PC-C — 켜져 있고 실행 중이 아니다 (PC-A 는 실행 중이라 칸이 잠긴다)
+            page = shoot(browser, "16_admin_device_settings", "admin", "#/device/d3000000-0000-0000-0000-000000000003",
+                         DESKTOP, errors)
+            page.wait_for_selector(".form", timeout=8000)          # 첫 답은 2초 뒤에 읽는다
+            calls = page.evaluate("window.__RPC.map(c => c[0])")
+            out.append(check("★ 화면을 열면 PC 에 묻고 답을 읽는다 (서버 표를 읽지 않는다)",
+                             calls[:2] == ["request_settings", "take_settings"] and page.is_visible("text=PC 에서 받은 값"),
+                             str(calls)))
+            box = page.get_by_label("박스")
+            out.append(check("받은 값이 칸에 들어간다", box.input_value() == "박스A", box.input_value()))
+            box.fill("박스B")
+            page.get_by_role("button", name="저장").click()
+            page.wait_for_function("window.__RPC.some(c => c[0] === 'set_device_settings')")
+            sent = page.evaluate("window.__RPC.find(c => c[0] === 'set_device_settings')[1]")
+            out.append(check("★ 바꾼 키만 보낸다 (그 사이 PC 에서 고친 다른 값을 덮지 않게)",
+                             sent == {"device": "d3000000-0000-0000-0000-000000000003", "settings": {"delivery_box": "박스B"}},
+                             str(sent)))
+            page.screenshot(path=str(OUT / "16_admin_device_settings.png"), full_page=True)
+            page.close()
+            page = shoot(browser, "17_owner_device_off", "owner", "#/device/d2000000-0000-0000-0000-000000000002",
+                         DESKTOP, errors)
+            out.append(check("PC 가 꺼져 있으면 묻지 않고 알린다",
+                             page.is_visible("text=PC 가 꺼져 있어") and not page.evaluate(
+                                 "(window.__RPC || []).some(c => c[0] === 'request_settings')")))
+            page.close()
 
-            def submit(cur: str, new: str, again: str) -> str:
-                page.fill("#pwCur", cur)
-                page.fill("#pwNew", new)
-                page.fill("#pwNew2", again)
-                page.click("#pwSubmit")
-                page.wait_for_function("document.getElementById('pwMsg').textContent !== '바꾸는 중...'")
-                return page.inner_text("#pwMsg")
-
-            got = submit("old-pass-1", "short7!", "short7!")
-            out.append(check("새 비밀번호가 짧으면 바꾸지 않는다", "8자 이상" in got
-                             and page.evaluate("window.__UPDATED") is None, got))
-            got = submit("old-pass-1", "new-pass-22", "new-pass-23")
-            out.append(check("다시 입력이 다르면 바꾸지 않는다", "다릅니다" in got, got))
-            long_korean = "가" * 25              # 25글자 = 75바이트 > 서버 상한 72바이트
-            got = submit("old-pass-1", long_korean, long_korean)
-            out.append(check("한글이 많아 서버 상한(바이트)을 넘으면 미리 막는다", "너무 깁니다" in got
-                             and page.evaluate("window.__UPDATED") is None, got))
-            got = submit("wrong-pass", "new-pass-22", "new-pass-22")
-            out.append(check("★ 현재 비밀번호가 틀리면 바꾸지 않는다", "맞지 않습니다" in got
-                             and page.evaluate("window.__UPDATED") is None, got))
-            got = submit("old-pass-1", "new-pass-22", "new-pass-22")
-            out.append(check("★ 맞으면 바꾸고 다른 곳의 로그인을 끊는다 — 입력칸은 비운다",
-                             "바꿨습니다" in got and page.evaluate("window.__UPDATED") == "new-pass-22"
-                             and page.evaluate("window.__SIGNOUT") == "others" and page.input_value("#pwNew") == "",
-                             got))
-            page.screenshot(path=str(OUT / "16_owner_account.png"), full_page=True)
+            log.info("▶ 업체 단위 중지 (10-07) — 관리자만")
+            page = shoot(browser, "18_admin_suspend", "admin", "#/devices", DESKTOP, errors)
+            out.append(check("관리자 전체 보기에는 중지 단추가 없다 (업체를 골라야)",
+                             page.get_by_role("heading", name="업체 사용").count() == 0))
+            page.on("dialog", lambda d: d.accept())
+            page.select_option("#accountSel", "bbbbbbbb-0000-0000-0000-000000000002")
+            page.wait_for_selector("text=중지됨")
+            page.get_by_role("button", name="중지 풀기").click()
+            page.wait_for_selector("text=사용 중")
+            called = page.evaluate("window.__RPC.filter(c => c[0].endsWith('_account'))")
+            out.append(check("★ 고른 업체의 중지를 풀면 resume_account 를 부른다 (확인 창 뒤)",
+                             called == [["resume_account", {"account": "bbbbbbbb-0000-0000-0000-000000000002"}]], str(called)))
+            page.screenshot(path=str(OUT / "18_admin_suspend.png"), full_page=True)
+            page.close()
+            page = shoot(browser, "19_owner_devices", "owner", "#/devices", DESKTOP, errors)
+            out.append(check("업체 사용자에게는 중지 단추가 없다",
+                             page.get_by_role("heading", name="업체 사용").count() == 0
+                             and page.get_by_role("button", name="이 업체 RPA 중지").count() == 0))
             page.close()
 
             log.info("▶ 휴대폰 폭")
             for name, hash_, help_ in (("12_phone_home", "#/home", False), ("13_phone_usage", "#/usage", False),
-                                       ("14_phone_help", "#/home", True), ("17_phone_account", "#/account", False)):
+                                       ("14_phone_help", "#/home", True),
+                                       ("20_phone_device", "#/device/d1000000-0000-0000-0000-000000000001", False)):
                 page = shoot(browser, name, "admin", hash_, PHONE, errors, questions=4, open_help=help_)
                 wide = page.evaluate("document.scrollingElement.scrollWidth - window.innerWidth")
                 out.append(check(f"{name} — 가로 스크롤 없음", wide <= 1, f"{wide}px 넘침"))
