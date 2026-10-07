@@ -19,6 +19,9 @@ Invoke → 컨트롤 클릭 → Enter 순서로 시도하고, 실제로 무엇�
   "입력된 전화번호가 없어 2차 인증을 할 수 없습니다." → [확인(O)]
 이 팝업은 닫고 계속 진행한다. 그 외의 팝업은 로그인 실패로 보고 내용을 그대로 보고한다.
 
+비밀번호 변경 요구 창(`Frm_ChangePassword`)은 늘 [다음에 변경하기] 를 누른다 (사용자 확정 10-07).
+그 단추가 없거나 꺼져 있으면(강제 변경) 누르지 않고 `LoginRejected` — 사람이 바꿔야 한다.
+
 비밀번호는 로그에 남기지 않는다.
 """
 from __future__ import annotations
@@ -63,6 +66,11 @@ FATAL_PATTERNS = (
 )
 
 MAX_DIALOGS = 5  # 팝업 처리 상한. 무한 반복하지 않는다.
+
+# 비밀번호 변경 요구 창 — 로그인 창의 자식 (CONTROLS.md 로그인 절, 10-07 실측)
+PASSWORD_CHANGE_AUTO_ID = "Frm_ChangePassword"
+LATER_BUTTON_AUTO_ID = "btn_NextTime"
+PASSWORD_CHANGE_REASON = "ERPia 가 비밀번호 변경을 요구한다 — [다음에 변경하기] 가 없다 (강제 변경)"
 
 
 class LoginError(RuntimeError):
@@ -377,6 +385,34 @@ def _dismiss(dialog, button) -> str:
         return f"[{label}] 클릭"
 
 
+def _present(spec):
+    """한 번만 찾아 본다 (기다리지 않는다). 없으면 None."""
+    try:
+        return spec.wrapper_object() if spec.exists(timeout=0) else None
+    except Exception as exc:
+        log.debug("찾기 실패: %s", exc)
+        return None
+
+
+def _password_change(login_win):
+    """비밀번호 변경 요구 창(spec). 없으면 None."""
+    spec = login_win.child_window(auto_id=PASSWORD_CHANGE_AUTO_ID, control_type="Window")
+    return spec if _present(spec) is not None else None
+
+
+def _press_later(window) -> str:
+    """[다음에 변경하기]. 없거나 꺼져 있으면 누르지 않고 멈춘다 ([변경하기] 는 절대 누르지 않는다)."""
+    button = _present(window.child_window(auto_id=LATER_BUTTON_AUTO_ID, control_type="Button"))
+    try:
+        usable = button is not None and button.is_visible() and button.is_enabled()
+    except Exception:
+        usable = False
+    if not usable:
+        body = _present(window)
+        raise LoginRejected(PASSWORD_CHANGE_REASON, _dialog_text(body) if body is not None else "")
+    return _dismiss(window, button)
+
+
 # ------------------------------------------------------------------ 완료 대기
 def _wait_logged_in(
     company_code: str,
@@ -395,6 +431,9 @@ def _wait_logged_in(
     deadline = time.monotonic() + timeout
 
     def probe():
+        change = _password_change(login_win)
+        if change is not None:
+            return ("password", change)
         dialog = _find_dialog(pid, login_win, login_handle)
         if dialog is not None:
             return ("dialog", dialog)
@@ -407,6 +446,7 @@ def _wait_logged_in(
         return None
 
     # 팝업이 여러 번 뜰 수 있다. 상한을 두고 반복한다.
+    deferred = False
     for _ in range(MAX_DIALOGS + 1):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -418,6 +458,19 @@ def _wait_logged_in(
 
         if kind == "main":
             return value
+
+        if kind == "password":
+            if deferred:
+                raise LoginError("비밀번호 변경 창이 다시 떴다.")
+            deferred = True
+            log.warning("ERPia 가 비밀번호 변경을 요구했다 — %s (늘 미룬다, 사용자 확정 10-07)",
+                        _press_later(value))
+            try:
+                wait_for(lambda: _password_change(login_win) is None, "비밀번호 변경 창 닫힘",
+                         timeout=max(1.0, deadline - time.monotonic()))
+            except WaitTimeout as exc:
+                raise LoginError("[다음에 변경하기] 를 눌렀는데 비밀번호 변경 창이 닫히지 않았다.") from exc
+            continue
 
         dialog, button = value
         text = _dialog_text(dialog)

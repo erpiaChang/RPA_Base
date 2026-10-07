@@ -34,9 +34,9 @@
 
 | 고친 곳 | 돌릴 것 (건수) |
 | --- | --- |
-| 흐름·단계·결과 문구 (`orchestrator/`) | `probe_progress` 47 · `probe_failure` 62 · `probe_pipeline` 41 · `probe_report` 12 · `probe_modules` 93 (실행 창 흐름·기능 선택·메일 실패 뒤 계속) |
+| 흐름·단계·결과 문구 (`orchestrator/`) | `probe_progress` 47 · `probe_failure` 65 · `probe_pipeline` 41 · `probe_report` 12 · `probe_modules` 93 (실행 창 흐름·기능 선택·메일 실패 뒤 계속) |
 | **사용자에게 보이는 글** (어디든) | `probe_userlog` 119 — **필수** |
-| ERPia 조작 (`automation/`, `utils/ui.py`) | `probe_hold_loop` 53 · `probe_rect_settle` 27 · `probe_failure` 62 |
+| ERPia 조작 (`automation/`, `utils/ui.py`) | `probe_hold_loop` 53 · `probe_rect_settle` 27 · `probe_failure` 65 |
 | 창·화면 (`gui/`) | `probe_gui`(실패 0) · `probe_modules` 93 · `probe_overlay` 81(화면이 잠겨 있으면 73) · `probe_history` 19 — **찍어서 본다** (`probe_shot --stages`, `probe_modules --shot`) |
 | 색·글자 크기 | `probe_contrast` 60 — **필수** |
 | 예약·자동 실행 | `probe_schedule` 97 · `probe_autorun` 59 |

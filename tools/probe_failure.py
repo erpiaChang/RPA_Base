@@ -185,6 +185,7 @@ def main() -> int:
     results += _check_resume_from()
     results += _check_collect_wait()
     results += _check_real_popup()
+    results += _check_password_change()
 
     log.info("결과: 통과 %d / 실패 %d", sum(results), len(results) - sum(results))
     log.info("★ 여기서 확인한 것은 **흐름 틀의 실패 처리**다. 각 업무 단계가 "
@@ -860,6 +861,92 @@ def _check_real_popup() -> list[bool]:
     finally:
         fake.kill()
         fake.wait(timeout=10)
+    return out
+
+
+# 가짜 ERPia 로그인 — 로그인 단추를 누르면 비밀번호 변경 요구 창(같은 auto_id)이 로그인 창의 자식으로 뜬다.
+# [Later] 만 로그인을 끝낸다. [Change] 는 아무것도 하지 않는다 (누르면 로그인이 끝나지 않아 시험이 실패한다).
+# 로그인 단추는 타이머로 창을 띄운다 — 단추 안에서 ShowDialog 하면 Invoke 가 창이 닫힐 때까지 돌아오지 않는다.
+_FAKE_LOGIN = r"""
+Add-Type -AssemblyName System.Windows.Forms
+$later = __LATER__
+$login = New-Object System.Windows.Forms.Form
+$login.Name = 'LoginForm'; $login.Text = 'login FAKE'; $login.Width = 360; $login.Height = 260
+$top = 10
+foreach ($name in @('txt_Admin_Code', 'txt_ID', 'txt_Password')) {
+  $t = New-Object System.Windows.Forms.TextBox
+  $t.Name = $name; $t.Top = $top; $t.Left = 10; $t.Width = 200; $top += 30
+  $login.Controls.Add($t)
+}
+$main = New-Object System.Windows.Forms.Form
+$main.Name = 'Main'; $main.Text = 'comp01 - user01 FAKE'
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 200
+$timer.Add_Tick({
+  $timer.Stop()
+  $c = New-Object System.Windows.Forms.Form
+  $c.Name = 'Frm_ChangePassword'; $c.Text = 'change FAKE'; $c.Width = 300; $c.Height = 160
+  $b = New-Object System.Windows.Forms.Button
+  $b.Name = 'btn_Change'; $b.Text = 'Change'; $b.Top = 50; $b.Left = 10
+  $c.Controls.Add($b)
+  if ($later) {
+    $n = New-Object System.Windows.Forms.Button
+    $n.Name = 'btn_NextTime'; $n.Text = 'Later'; $n.Top = 50; $n.Left = 100
+    $n.Add_Click({ $this.FindForm().Close(); $login.Close(); $main.Show() })
+    $c.Controls.Add($n)
+  }
+  [void]$c.ShowDialog($login)
+})
+$go = New-Object System.Windows.Forms.Button
+$go.Name = 'lbl_LoginBtn'; $go.Text = 'Login'; $go.Top = $top; $go.Left = 10
+$go.Add_Click({ $timer.Start() })
+$login.Controls.Add($go)
+$login.Show()
+[System.Windows.Forms.Application]::Run()
+"""
+
+
+def _check_password_change() -> list[bool]:
+    """비밀번호 변경 요구 창 (10-07 사용자 확정 — 늘 [다음에 변경하기]). 가짜 ERPia 로그인(WinForms)으로."""
+    import base64
+    import subprocess
+
+    from automation import login as lg
+    from orchestrator import friendly
+    from utils import process, winprobe
+    from utils.wait import wait_for
+
+    log.info("▶ 진짜 창 — 로그인 중 비밀번호 변경 요구 창 (WinForms, 이 시험의 프로세스만)")
+    if process.screen_locked():
+        log.info("  건너뜀  화면이 잠겨 있어 진짜 창 시험을 못 한다")
+        return []
+
+    def run(later: bool):
+        script = _FAKE_LOGIN.replace("__LATER__", "$true" if later else "$false")
+        encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+        fake = subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
+        try:
+            # 가짜 로그인 창이 뜬 뒤에 부른다 — 못 찾으면 login 이 전역(진짜 ERPia)으로 넘어간다
+            wait_for(lambda: any(w.title == "login FAKE" for w in winprobe.top_windows(fake.pid)),
+                     "가짜 로그인 창", timeout=30)
+            try:
+                return lg.login("comp01", "user01", "pw-fake", pid=fake.pid, timeout=20)
+            except Exception as exc:                # noqa: BLE001 - 무엇이 났는지 본다
+                return exc
+        finally:
+            fake.kill()
+            fake.wait(timeout=10)
+
+    got = run(later=True)
+    out = [check("★ [다음에 변경하기] 를 누르고 로그인을 마친다", isinstance(got, str) and "comp01 - user01" in got,
+                 repr(got)[:120])]
+    got = run(later=False)
+    out.append(check("★ [다음에 변경하기] 가 없으면(강제 변경) 누르지 않고 멈춘다",
+                     isinstance(got, lg.LoginRejected) and "비밀번호 변경을 요구" in str(got), repr(got)[:120]))
+    text = friendly.explain(got) if isinstance(got, BaseException) else ""
+    out.append(check("강제 변경은 사람 말로 — 직접 바꾸고 [설정] 도 고치라고", "[ERPia 비밀번호]" in text, text[:80]))
     return out
 
 
