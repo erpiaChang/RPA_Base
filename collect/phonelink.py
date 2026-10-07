@@ -51,6 +51,9 @@ POLL = 2.0                      # 목록 확인 간격(초)
 # ★ **클릭하지 않고 UIA 선택으로 고른다** — 창이 뒤에 있거나 가려져 있어도 된다
 #   (모니터가 1개면 브라우저가 앱을 덮는다).
 MESSAGING_TAB_AUTO_ID = "MessagingNodeAutomationId"
+# 다른 앱 판의 [메시지] 탭 id (다른 팀 사본 기준 — 이 PC 실측 아님, 10-07). 이름이 메시지일 때만 쓴다
+MESSAGING_TAB_ALT_AUTO_IDS = ("ChatNodeAutomationId",)
+MESSAGING_TAB_NAME_RE = re.compile(r"메시지|Messages?\b", re.I)
 MESSAGING_TAB_HOTKEY = "^1"
 TAB_WAIT = 10.0                 # 탭을 옮긴 뒤 목록이 나타나기를 기다리는 상한(초)
 
@@ -130,7 +133,9 @@ _LIST_BASELINE = {"taken": False}
 # 본문이 baseline 과 같은데 대화가 미읽음으로 돌아온 경우는 **고르지 않는다** — 같은 번호 재발송과 폰 쪽
 # 미읽음 동기화를 구별할 수 없고, 만료된 번호를 반복해 넣으면 계정이 잠긴다. 기다리다 실패하는 쪽이 안전하다.
 
-CODE_RE = re.compile(r"\b(\d{4,8})\b")
+# 숫자 4~8자리. 앞뒤에 숫자·영문·'-' 가 붙으면 전화번호·날짜·코드 조각이라 뺀다. 한글 바로 옆 숫자는 후보다
+# ('인증번호123456입니다' — `\b` 는 한글을 글자로 봐 못 잡았다). 후보가 여럿이면 지금처럼 멈춘다 (10-07).
+CODE_RE = re.compile(r"(?<![0-9A-Za-z\-])(\d{4,8})(?![0-9A-Za-z\-])")
 PANE_AUTO_ID = "ConversationPane"
 # ★ ConversationPane 의 control_type 은 **Group** 이다 (2026-09-10 실측).
 #   예전에는 `window.descendants()` 로 창 전체를 훑어 이 하나를 찾았다.
@@ -400,7 +405,7 @@ def ensure_messages_tab(window=None) -> None:
     window = _window() if window is None else window
     if _conversation_list(window) is not None:
         return
-    tab = _by_auto_id(window, MESSAGING_TAB_AUTO_ID, control_type="TabItem")
+    tab = _by_auto_id(window, MESSAGING_TAB_AUTO_ID, control_type="TabItem") or _alt_messages_tab(window)
     if tab is None:
         raise PhoneLinkError(
             f"[메시지] 탭({MESSAGING_TAB_AUTO_ID})을 찾지 못했다. 앱이 오프라인 "
@@ -555,6 +560,15 @@ def read_messages() -> list[tuple["datetime | None", str]]:
 
 
 # --------------------------------------------------------------- 연결 상태
+def _alt_messages_tab(window):
+    """다른 앱 판의 [메시지] 탭 — 이름이 메시지일 때만 (10-07). 없으면 None."""
+    for auto_id in MESSAGING_TAB_ALT_AUTO_IDS:
+        tab = _by_auto_id(window, auto_id, control_type="TabItem")
+        if tab is not None and MESSAGING_TAB_NAME_RE.search(tab.element_info.name or ""):
+            return tab
+    return None
+
+
 def _by_auto_id(window, auto_id: str, control_type: str = "Button"):
     for ctrl in window.descendants(control_type=control_type):
         if (ctrl.element_info.automation_id or "") == auto_id:

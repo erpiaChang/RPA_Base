@@ -190,6 +190,52 @@ class FakeWindow:
         self.keys.append(keys)
 
 
+def check_codes_and_alt_tab() -> list[bool]:
+    """인증번호 후보 고르기·다른 앱 판의 [메시지] 탭 id (10-07). 값은 가짜다."""
+    log.info("▶ 인증번호 후보 (하이픈·한글 붙은 숫자) / 다른 판의 [메시지] 탭")
+    find = phonelink.CODE_RE.findall
+    # 전화번호 꼴은 쓰지 않는다 (probe_leaks 가 막는다) — 하이픈 번호는 대표번호 꼴, 긴 숫자는 9 로 시작
+    out = [check("문의 번호(하이픈)는 빼고 인증번호만", find("[Web발신] 인증번호 123456 (문의 1588-1234)") == ["123456"]),
+           check("하이픈 날짜는 빼고 인증번호만", find("2026-10-07 인증번호 123456") == ["123456"]),
+           check("하이픈 번호·긴 숫자만 있으면 후보 없음", find("1588-1234") == [] and find("99912345678") == []),
+           check("★ 한글에 붙은 인증번호도 잡는다", find("인증번호123456입니다") == ["123456"]),
+           check("후보가 여럿이면 여럿 (멈추는 정책 그대로)", find("인증번호 123456 / 654321") == ["123456", "654321"]),
+           check("영문에 붙은 숫자는 후보가 아니다", find("A1234") == [])]
+    saved = phonelink._window
+    try:
+        alt = FakeCtrl(auto_id="ChatNodeAutomationId", name="메시지(Ctrl+1)")
+        boxes: dict = {"TabItem": [alt]}
+
+        def window_now():
+            boxes["List"] = [FakeCtrl(auto_id=phonelink.LIST_AUTO_ID)] if alt.selected else []
+            return FakeWindow(boxes)
+
+        phonelink._window = window_now
+        phonelink.ensure_messages_tab()
+        out.append(check("다른 판 id 의 [메시지] 탭도 고른다 (이름이 메시지일 때)", alt.selected))
+        phonelink._window = lambda: FakeWindow({"TabItem": [FakeCtrl(auto_id="ChatNodeAutomationId", name="채팅 앱")]})
+        try:
+            phonelink.ensure_messages_tab()
+            refused = False
+        except phonelink.PhoneLinkError:
+            refused = True
+        out.append(check("다른 판 id 라도 이름이 메시지가 아니면 쓰지 않는다", refused))
+        main = FakeCtrl(auto_id=phonelink.MESSAGING_TAB_AUTO_ID, name="메시지(Ctrl+1)")
+        other = FakeCtrl(auto_id="ChatNodeAutomationId", name="메시지")
+        boxes = {"TabItem": [other, main]}
+
+        def both():
+            boxes["List"] = [FakeCtrl(auto_id=phonelink.LIST_AUTO_ID)] if main.selected or other.selected else []
+            return FakeWindow(boxes)
+
+        phonelink._window = both
+        phonelink.ensure_messages_tab()
+        out.append(check("둘 다 있으면 기존 id 를 고른다", main.selected and not other.selected))
+    finally:
+        phonelink._window = saved
+    return out
+
+
 def check_messages_tab() -> list[bool]:
     """[메시지] 탭 맞추기 + [다시 시도] 이름 판정 (2026-09-21).
 
@@ -651,6 +697,7 @@ def main() -> int:
 
     log.info("▶ [메시지] 탭 맞추기 + [다시 시도] 이름 판정 (2026-09-21)")
     results.extend(check_messages_tab())
+    results.extend(check_codes_and_alt_tab())
 
     log.info("▶ 예약 전 점검은 보기만 한다 (2026-10-01)")
     results.extend(check_peek())

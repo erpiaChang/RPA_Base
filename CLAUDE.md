@@ -40,7 +40,7 @@
 | 창·화면 (`gui/`) | `probe_gui`(실패 0) · `probe_modules` 93 · `probe_overlay` 81(화면이 잠겨 있으면 73) · `probe_history` 19 — **찍어서 본다** (`probe_shot --stages`, `probe_modules --shot`) |
 | 색·글자 크기 | `probe_contrast` 60 — **필수** |
 | 예약·자동 실행 | `probe_schedule` 97 · `probe_autorun` 59 |
-| 수집 (`collect/`) · 비밀번호 감싸기 | `probe_phone_wait` 48 · `probe_webmail` 17 · `probe_secret` 37 (사이트 전용은 git 밖 `tools.local.*`) |
+| 수집 (`collect/`) · 비밀번호 감싸기 | `probe_phone_wait` 57 · `probe_webmail` 17 · `probe_secret` 37 (사이트 전용은 git 밖 `tools.local.*`) |
 | ERPia 업데이트·UAC | `probe_updater` 18 |
 | 빌드 프로그램·고정값 (`gui/build_app.py`, `LOCKED_KEYS`) | `probe_build` 35 |
 | 서버 보고 (`orchestrator/telemetry.py`) | `probe_telemetry` 67 — **필수** |
