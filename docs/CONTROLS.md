@@ -51,6 +51,16 @@ class_name: `WindowsForms10.Window.8.app.0.31c915c_r7_ad1`
 | 본문 | `Text auto_id="lbl_contents"` (`tbPnl_Contents` 안) |
 | 버튼 | `확인(O)` = `Button auto_id="btn_확인(&O)"` (`stPnl_Buttons` 안, 처음부터 보임) + 제목줄 `닫기`(auto_id 빈 값) |
 
+**비밀번호 변경 요구 창 (2026-10-07 실측, 설정 계정)** — 로그인 버튼을 누른 뒤 로그인 창 안에 뜬다. "오랜 기간 비밀번호를
+변경하지 않으셨습니다 … 변경해주세요". **지금 로그인 코드는 이 창을 모른다** → 30초 뒤 `LoginError`(로그인 창이 그대로). 예약 실행도 여기서 멈춘다.
+무엇을 누를지는 사용자 결정 (HANDOFF 열린 항목) — 조사만 했고 누르지 않았다.
+
+| 요소 | 값 |
+| --- | --- |
+| 창 | `Window auto_id="Frm_ChangePassword"` title `비밀번호 변경`, 부모 = 로그인 창(`LoginForm`) |
+| 입력 | 현재 `txt_PrevPassword` / 새 `txt_NewPassword` / 확인 `txt_NewPasswordCheck` (각 Pane 안 `Edit auto_id="txt"`) |
+| 단추 | `변경하기` = `Button auto_id="btn_Change"` / `다음에 변경하기` = `Button auto_id="btn_NextTime"` (`tbPnl_Input` 안) |
+
 ★ 09-09 부터 로그가 "확인 버튼을 찾지 못했다 → Enter" 였던 원인: 코드가 `wrapper.descendants(title_re=...)`
   로 찾았는데 **`descendants()` 는 `title_re` 를 받지 않아 TypeError** — `except` 에 묻혀 "버튼 없음".
   버튼을 전부 받아 이름으로 거르게 고쳤다 (`login._confirm_buttons`). 고친 뒤 두 팝업 모두 `[확인(O)] Invoke` 로 닫힘.
