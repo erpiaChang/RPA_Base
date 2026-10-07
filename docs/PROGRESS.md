@@ -85,7 +85,7 @@
 | `automation/logistics_wait.py` | 물류대기 전체. `menu_available()` — **메뉴가 없는 계정 판정** / `ensure_bottom_sorted()` — 하단 정렬 후 묶음 끝에서 스캔 중단 (09-17). **주문 수는 행이 아니라 전표로** (09-29) — 보류는 체크한 행의 `전표번호`, 저장은 [일반] 탭 전후 `count_general_slips` (전표번호가 오른쪽 밖이라 가로로 넘겨 읽는다) |
 | `automation/logistics.py` | 물류관리 전체. `select_mode()` 자동/수동, `press_finish()` 마지막 버튼. `count_slips` — 하단 `매출번호` 를 **끝까지** 읽어 중복 없이 = 올라간 주문 (09-29). `count_boxes` — **만든 전표 = 박스(송장) 수**, 저장 직전 상단 `배송업체` 가 찬 줄 (09-29 실기: 주문 2건 → 송장 31) |
 | `collect/webmail.py` | **메일 사이트 틀** (10-02) — `MailSite` 계약(로그인 한 번·목록·메일 열기·첨부 단추·목록으로) + `login`(재시도)·`collect`(대상 선별·받기·매니페스트). 사이트마다 다른 것은 사이트 파일에만 — 목록을 기간 안쪽이 끝날 때까지 넘기는 일도 사이트 파일(`list_rows_until`, 상한 `MAX_PAGES`=20) |
-| `collect/browser.py` | 시크릿 창 브라우저 (Playwright, `CHANNELS` msedge·chrome) |
+| `collect/browser.py` | 시크릿 창 브라우저 (Playwright, `CHANNELS` msedge·chrome). 브라우저 없음은 `BrowserError` 로 사람 말 (10-07). **사이트 화면 도우미** (10-07, `docs/SITES.md` 4절) — `click_through`(가로막는 공지)·`hover_click`·`receive_download`/`save_download`(팝업 포함·엑셀 검사)·`DialogGuard`(기대 문구만 수락)·`RowWatch`(새 줄만). Playwright 는 함수 안에서만 부른다 (메일 없는 빌드) |
 | `collect/sites/__init__.py` | 사이트 목록 — git 밖 `collect/sites/local/` 을 글자 그대로 불러온다(빌드가 따라 묶는다). 없으면 `SiteMissing` — 실행 창은 '메일 사이트 연결' 입력 필요. **원본에는 사이트가 없다** (`docs/SITES.md`) |
 | `collect/pw_driver.py` | **메일 브라우저 node.exe 를 켤 때마다 풀지 않는다** (09-29) — 빌드가 exe 리소스로 넣은 것을 메일 기능을 처음 쓸 때 exe 옆 `driver\<해시>\` 로 한 번 꺼낸다(해시 검사·옛 판 지우기) |
 | `collect/auth_code.py` | 인증번호 경로 선택 (`sms_source`: phonelink / adb / auto). `precheck` — 예약 전 **보기만 하는** 점검 (10-02) |
@@ -141,8 +141,9 @@
 | `probe_report.py` / `probe_pipeline.py` | 리포트 (12) / 진행 파이프라인·큰 단계 넷 (41) |
 | `probe_contrast.py` | 색 대비와 글자 위계 (60) |
 | `probe_modules.py` | 기능 선택·순서·**메일이 멈춰도 뒤 기능**·입력 잠금·예약 회차의 기능·작은 화면·경로 두 칸 맞추기·실행 중 홈 고정·예약 전 경고·이번만 건너뛰기·휴대폰 점검·[멈춘 곳부터 다시]·메일 기능의 입력 필요(저장 폴더·인증 문자·사이트 연결·무선 주소)·무인 예약이 시작을 못 하면 기록 ·처리 안 된 예외 알림(10-07) (93). `--shot` 창 찍기 (알림 창 둘 포함) |
+| `probe_browser.py` | **사이트 화면 도우미** (10-07) — 127.0.0.1 가짜 사이트 + 진짜 Edge(창 없이): 가로막는 공지·마우스 올림 메뉴·팝업이 주고 닫히는 파일·HTML 을 엑셀 이름으로·알림창(기대 문구만)·새 줄만·업로드 폼·금지 꼴 소스 검사 (23). 실사이트·외부 접속 없음 |
 | `probe_webmail.py` | 메일 사이트 틀 — 사이트 폴더가 **진짜로 없을 때**·필수 설정·받기 실패 다시 열기(다시 받은 엑셀만 소비)·`[ ]` 제목·가짜 사이트로 수집 (17). 사이트 전용(페이지 넘김 등)은 git 밖 `tools/local/` |
-| `probe_userlog.py` | **사용자가 보는 글** — 10장면을 가짜로 돌려 내부 값이 새는지·건수·상품명·확인할 것·시험 실행 되돌리기·상세 페이지·브라우저 없음(10-07) (118). `--write` 로 검토본 |
+| `probe_userlog.py` | **사용자가 보는 글** — 10장면을 가짜로 돌려 내부 값이 새는지·건수·상품명·확인할 것·시험 실행 되돌리기·상세 페이지·브라우저 없음·사이트 화면 도우미 오류 문구(10-07) (119). `--write` 로 검토본 |
 | `probe_hooks.py` | 훅이 막을 것을 막는지 — 조작 실행·경로·비밀 키·서버 쓰기·실서버 SQL(APPROVED-SQL)·서브에이전트·PowerShell·규칙 경고(`wait_for_timeout`)·GitHub 에 올리기(`git push`·`gh repo create`·`--no-verify`·`npx wrangler@4 deploy`)·서브에이전트의 `.env`·구운 설정 읽기(대소문자 섞어도)·git/gh 다른 꼴(`git.exe`·`-C`·`bash -c`·커밋 검사 끄기·훅 자리 바꾸기·`gh gist/release/api` 쓰기)·서브에이전트의 셸 재귀 검색·비밀 파일 역슬래시 경로 (134) |
 | `probe_leaks.py` | **git 에 실값이 없나** (10-02) — 낱말 목록 없이 `settings.local.json`·`.env`·git 밖 사이트/업체 파일·이 PC 이름에서 값을 뽑고, 메일·전화·사용자 경로·내부 IP 모양도 본다. `파일:줄 — 어디서 온 값` 만 찍는다. 인자 없이 = 추적·새 파일의 지금 내용 / `--staged`(`.githooks/pre-commit`) / `--pre-push`(`pre-push`, 올리는 커밋만) / `--history`(손으로, 모든 ref) / `--selftest` (44). 감싼 비밀번호(dpapi:·baked:)는 풀어서 평문도 찾는다. 설정·.env 를 못 읽으면 커밋·push 를 막는다 |
 | `probe_history.py` | 지난 실행 이력·[실행 기록] 탭·건너뛴 예약(기록 파일·이어지면 한 줄) (19) |

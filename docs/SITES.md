@@ -18,7 +18,7 @@
 
 ```
 collect/
-  browser.py        공용 (git) — browser_page()·page_text()·eval_json(). 시크릿(InPrivate) 창. 메일 사이트와 Site/Task 가 같이 쓴다
+  browser.py        공용 (git) — browser_page()·page_text()·eval_json() + 사이트 화면 도우미(4절 표, 10-07). 시크릿(InPrivate) 창. 메일 사이트와 Site/Task 가 같이 쓴다
   sites/
     __init__.py     (git) available()·mail_site() — local/ 을 불러온다. 사이트가 없으면 SiteMissing, 둘 이상이면 MailError
     base.py         (아직 없음 — Site/Task 때) Site · Task · TaskResult · NeedsAttention (값과 예외만)
@@ -117,13 +117,25 @@ selector 를 설정에 두지 않는 이유: 사이트가 바뀌면 개발자가
 | 속도 제한 ("잠시 후 다시") | `failed`, 곧바로 재시도 안 함 |
 | 무인 예약 중 사람이 필요 | 기다리지 않는다 — `attention` + 확인할 것 + 서버 보고 |
 
+### 사이트 화면 도우미 (`collect/browser.py`, 10-07 — 다른 RPA 의 실측을 이 규칙 안으로 옮김)
+
+selector·기대 문구는 **인자로만** 받는다 (사이트 파일 상수). 글자로 짐작해 닫거나 JS 로 강제 클릭하지 않는다. 시험은 `probe_browser`.
+
+| 상황 | 도우미 | 규칙 |
+| --- | --- | --- |
+| 가로막는 공지 | `click_through(page, locator, notice_close=(selector…), label=)` | 못 누르면 사이트가 준 닫기 selector 만 누르고 다시 (상한 `CLOSE_ATTEMPTS`). 못 닫으면 `SiteScreenError` |
+| 마우스 올림 메뉴 | `hover_click(page, menu, item, notice_close=, label=)` | 메뉴·항목 selector 둘 다 사이트 파일이 준다. 항목이 안 보이면 멈춘다 |
+| 파일 받기 | `receive_download(page, act, guard=, timeout_s=)` → `save_download(dl, path)` | 누른 창이든 그것이 연 팝업이든 첫 파일. 안 오면 `DownloadTimeout`. 엑셀이 아니면(로그인 풀림 HTML) `SiteFileError`. ★ Edge 는 받은 뒤 `edge://downloads-hub` 창을 연다 — **닫지 않는다**(Playwright 로 닫으면 끝나지 않았다), `site_pages()` 가 뺀다. ★ 대기 중 이벤트는 페이지가 아니라 브라우저에 물어 받는다 — 다운로드로 바뀐 이동 중인 페이지에 `evaluate` 하면 멈췄다 |
+| 알림창 | `DialogGuard(page.context)` + `with guard.expecting(문구…)` | 사이트가 준 문구와 완전일치·정규식 전체일치만 수락, 나머지는 닫고(confirm 은 취소) `UnexpectedDialog` |
+| 새로 생긴 줄 | `RowWatch(page, rows, cell=, root=)` `.mark()` → 누르기 → `.new_rows(empty=)` | 누르기 전 줄을 찍고 DOM 이 조용해질 때까지(상한) 기다린 뒤 새 줄만. 글자는 textContent. 0건은 사이트가 준 empty selector 가 보일 때만 |
+
 ## 5. 첫 사이트 때 한 번 만들 것 (그 뒤로는 안 고친다)
 
 메일이 아닌 사이트(Site/Task)를 처음 붙일 때다. 메일 사이트의 틀(`collect/webmail.py`·`collect/sites/__init__.py`)과 `collect/browser.py` 는 이미 있다.
 
 | 어디 | 무엇 |
 | --- | --- |
-| `collect/browser.py` | 이미 있다 (10-02) — `browser_page()`·`page_text()`·`eval_json()`. 옮길 것 없이 Site/Task 가 같이 쓴다 |
+| `collect/browser.py` | 이미 있다 (10-02, 도우미 10-07) — `browser_page()`·`page_text()`·`eval_json()` + 사이트 화면 도우미(4절). 옮길 것 없이 Site/Task 가 같이 쓴다 |
 | `collect/sites/` | `base`·`runner` (git) + 첫 사이트 파일 (**git 밖** `local/`). `local/__init__.py` 의 `SITES` 는 지금 메일 사이트용이라(`mail_site()` 가 그렇게 읽는다) Site/Task 등록표는 **따로 둔다** — 이름은 그때 정한다 |
 | `orchestrator/modules.py` · `steps_sites.py` · `full_flow.py` | `SITES = Module("sites", "사이트 엑셀 받기", erpia=False)` — 순서 메일 다음·주문수집 앞. `plan()` 분기. `_full` 의 메일 except 와 같은 규칙(실패해도 뒤 기능으로) |
 | `config/fields_collect.py` · `config/settings.py` | `site_tasks`·`site_user_ids`·`site_passwords` + `SECRET_MAP_KEYS` |
@@ -158,6 +170,7 @@ selector 를 설정에 두지 않는 이유: 사이트가 바뀌면 개발자가
 
 | 층 | 도구 | 보는 것 |
 | --- | --- | --- |
+| 사이트 화면 도우미 (만들어져 있다, 10-07) | `probe_browser` — 127.0.0.1 가짜 사이트 + 진짜 Edge(창 없이) (23) | 가로막는 공지·마우스 올림 메뉴·팝업이 주고 닫히는 파일·HTML 을 엑셀 이름으로·알림창·옛 줄+새 줄(통째로 다시 그리기 포함)·업로드 폼. 실사이트·외부 접속 없음 |
 | 메일 사이트 틀 (만들어져 있다) | `probe_webmail` — 가짜 사이트·가짜 Page (15) | 등록표가 비면 `SiteMissing`, 필수 설정(기간·읽지 않음)이 비면 멈춤, 받기 실패한 메일 다시 열기, 열기 재시도, 엑셀이 아니면 skipped, 시험 실행은 메일을 열지 않음 |
 | Site/Task 공통 (한 번, 아직 안 만듦) | `probe_sites` — 가짜 사이트 2개 | 순서, 한 곳 실패해도 계속, 상태 4개, 확인할 것, 사용자 글에 내부 값 없음, manifest, dry-run 에서 쓰기 Task 안 돎, 취소 |
 | 사이트마다 (**git 밖**) | `tools/local/probe_site_<id>` — `tools/local/probe_mail_pages.py` 의 가짜 Page 방식 | 그 사이트 코드의 분기 (정상·로그인 실패·방해 문구·0건·불량 파일·시간 초과) |

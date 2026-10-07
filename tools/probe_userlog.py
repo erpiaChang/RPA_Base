@@ -466,6 +466,13 @@ def _check_no_browser() -> list[bool]:
         other = launch_error("가짜 — 다른 실행 오류")
     finally:
         pw_api.sync_playwright, SETTINGS.browser_channel = keep
+    texts = [friendly.explain(kind("화면이 바뀜: 가짜 #selector 를 누르지 못했다 (Locator.click: Timeout)"))
+             for kind in (browser.SiteScreenError, browser.UnexpectedDialog, browser.DownloadTimeout,
+                          browser.SiteFileError)]
+    found = leaks({"lines": texts, "statuses": [], "summary": "", "failure": "", "steps": []})
+    out.append(check("사이트 화면 도우미 오류는 쉬운 말 — selector·Playwright 글이 새지 않는다 (10-07)",
+                     not found and all("#selector" not in t and "Locator" not in t for t in texts)
+                     and "메일 사이트" not in " ".join(texts), str(found or texts[0][:40])))
     out.append(check("실행 파일이 없다는 Playwright 오류만 BrowserError 로 바꾼다 (원인은 남긴다)",
                      isinstance(missing, browser.BrowserError) and missing.__cause__ is not None
                      and isinstance(other, pw_api.Error) and not isinstance(other, browser.BrowserError),
