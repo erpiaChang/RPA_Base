@@ -406,6 +406,11 @@ def check_friendly() -> list[bool]:
         "박스 '박스X' 을(를) 드롭다운에서 찾지 못했다.\n  드롭다운에서 '박스X' 을(를) 찾지 못했다.\n"
         "  끝까지 내려 확인한 값 3개: ['박스A', '박스B', '박스C']"), step)
     out.append(check("목록에 있는 이름을 같이 보여 준다", "목록에 있는 이름: 박스A, 박스B, 박스C" in got, got))
+    from utils import crashlog
+
+    found = leaks({"lines": [crashlog.CRASH_TEXT, crashlog.START_FAIL_TEXT], "statuses": [], "summary": "",
+                   "failure": "", "steps": []})
+    out.append(check("처리 안 된 예외 알림 글에 내부 값이 없다 (10-07)", not found, str(found)))
 
     log.info("▶ 암호 걸린 엑셀 알아보기 (파일 머리 8바이트)")
     from automation.order_mapping import OLE_SIGNATURE, password_state

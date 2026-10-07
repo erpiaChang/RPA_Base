@@ -35,7 +35,7 @@ for _stream in (sys.stdout, sys.stderr):
         continue
 
 from collect import pw_driver  # noqa: E402
-from utils import autostart, instance, process  # noqa: E402
+from utils import autostart, crashlog, instance, process  # noqa: E402
 from utils.logger import get_logger, setup_logging  # noqa: E402
 
 log = get_logger(__name__)
@@ -142,19 +142,19 @@ def check_entry() -> list[bool]:
     log.info("▶ main_run.py 순서 (가짜 잠금·넘기기·창)")
     out = []
     for name, frozen, args, acquire, handed, want in (
-            ("개발 중에는 넘기지 않고 뜬다", False, ["--background"], [True], None, ["acquire", "run"]),
+            ("개발 중에는 넘기지 않고 뜬다", False, ["--background"], [True], None, ["install", "acquire", "run"]),
             ("★ 로그온(--background)은 잠금을 놓고 넘긴다, 넘겼으면 창을 띄우지 않는다", True, ["--background"],
-             [True], True, ["acquire", "release", "hand_over"]),
+             [True], True, ["install", "acquire", "release", "hand_over"]),
             ("★ 사람이 누른 것은 넘기지 않고 바로 뜬다 — 두 번 풀지 않게", True, [], [True], None,
-             ["acquire", "run"]),
+             ["install", "acquire", "run"]),
             ("못 넘기면 다시 잡고 뜬다", True, ["--background"], [True, True], False,
-             ["acquire", "release", "hand_over", "acquire", "run"]),
+             ["install", "acquire", "release", "hand_over", "acquire", "run"]),
             ("못 넘긴 사이 다른 벌이 잡았으면 끝낸다", True, ["--background"], [True, False], False,
-             ["acquire", "release", "hand_over", "acquire"]),
+             ["install", "acquire", "release", "hand_over", "acquire"]),
             ("★ 작업이 띄운 것(--task)은 다시 넘기지 않는다", True, ["--background", "--task"], [True], None,
-             ["acquire", "run"]),
-            ("이미 떠 있고 사람이 눌렀으면 알린다", True, [], [False], None, ["acquire", "tell"]),
-            ("이미 떠 있고 자동 켜기면 조용히 끝난다", True, ["--background"], [False], None, ["acquire"])):
+             ["install", "acquire", "run"]),
+            ("이미 떠 있고 사람이 눌렀으면 알린다", True, [], [False], None, ["install", "acquire", "tell"]),
+            ("이미 떠 있고 자동 켜기면 조용히 끝난다", True, ["--background"], [False], None, ["install", "acquire"])):
         calls = _run_entry(frozen, args, list(acquire), handed)
         out.append(check(name, calls == want, f"{calls}"))
     return out
@@ -163,9 +163,10 @@ def check_entry() -> list[bool]:
 def _run_entry(frozen: bool, args: list[str], acquire: list[bool], handed: bool | None) -> list[str]:
     calls: list[str] = []
     keep = (instance.acquire, instance.release, instance.tell_already_running,
-            autostart.hand_over, sys.argv, sys.modules.get("gui.run_app"))
+            autostart.hand_over, sys.argv, sys.modules.get("gui.run_app"), crashlog.install)
     fake_gui = types.ModuleType("gui.run_app")
     fake_gui.run = lambda: calls.append("run") or 0
+    crashlog.install = lambda *a: calls.append("install")     # 진짜는 전역 훅을 바꾼다
     instance.acquire = lambda *a: calls.append("acquire") or acquire.pop(0)
     instance.release = lambda: calls.append("release")
     instance.tell_already_running = lambda: calls.append("tell")
@@ -180,7 +181,7 @@ def _run_entry(frozen: bool, args: list[str], acquire: list[bool], handed: bool 
         log.debug("main_run 끝 (%s)", done.code)
     finally:
         (instance.acquire, instance.release, instance.tell_already_running,
-         autostart.hand_over, sys.argv, gui) = keep
+         autostart.hand_over, sys.argv, gui, crashlog.install) = keep
         if gui is None:
             sys.modules.pop("gui.run_app", None)
         else:
@@ -197,6 +198,81 @@ def check_instance() -> list[bool]:
             check("그 밖의 이유로 못 만들면 뜬다", not second(None, 0)),
             check("만들었는데 이미 있으면 둘째다", second(1, instance.ERROR_ALREADY_EXISTS)),
             check("처음 만들었으면 뜬다", not second(1, 0))]
+
+
+def _caught(exc: BaseException):
+    try:
+        raise exc
+    except BaseException as got:        # noqa: BLE001 — 훅에 넘길 (종류, 값, 트레이스백)을 만든다
+        return type(got), got, got.__traceback__
+
+
+def _thread_boom() -> None:
+    raise RuntimeError("가짜 스레드 오류")
+
+
+def check_crashlog() -> list[bool]:
+    log.info("▶ 처리 안 된 예외 — logs 에 남기고 알림 (10-07)")
+    import threading
+
+    from utils.cancel import Cancelled
+
+    folder = Path(tempfile.mkdtemp())
+    told: list[str] = []
+    boxes: list[str] = []
+    keep = (sys.excepthook, threading.excepthook, crashlog._installed, crashlog._log_dir, crashlog._notifier,
+            dict(crashlog._seen), crashlog._notified, crashlog._message_box, sys.argv)
+    out = []
+    try:
+        crashlog._installed, crashlog._notified = False, 0
+        crashlog._seen.clear()
+        crashlog.install(folder)
+        hook = sys.excepthook
+        crashlog.install(folder)
+        out.append(check("훅을 건다 — 두 번 불러도 한 번만", hook is sys.excepthook is not keep[0]
+                         and threading.excepthook is not keep[1]))
+        crashlog.set_notifier(told.append)
+        for exc in (SystemExit(0), KeyboardInterrupt(), Cancelled()):
+            crashlog.report(*_caught(exc), "main")
+        out.append(check("끝내기·[중단](Cancelled)은 남기지도 알리지도 않는다",
+                         not told and not list(folder.glob("crash_*.log"))))
+        for _ in range(2):
+            crashlog.report(*_caught(ValueError("가짜 1")), "tk")
+        body = "".join(p.read_text(encoding="utf-8") for p in folder.glob("crash_*.log"))
+        out.append(check("crash 파일에 트레이스백, 같은 오류 두 번째는 한 줄·알림 없음",
+                         "Traceback" in body and "같은 오류 2번째" in body and len(told) == 1, str(len(told))))
+        for n in range(2, 6):
+            crashlog.report(*_caught(ValueError(f"가짜 {n}")), "tk")
+        out.append(check("알림은 프로세스당 3번까지", len(told) == crashlog.MAX_NOTICES, str(len(told))))
+        crashlog._seen.clear()
+        crashlog._notified = 0
+        told.clear()
+        worker = threading.Thread(target=_thread_boom, name="probe")
+        worker.start()
+        worker.join()
+        out.append(check("스레드에서 터진 예외도 알린다", told == [crashlog.CRASH_TEXT]))
+        crashlog.set_notifier(None)
+        crashlog._message_box = boxes.append
+        sys.argv = ["main_run.py", "--background"]
+        crashlog.report(*_caught(RuntimeError("켜기 실패 A")), "main")
+        sys.argv = ["main_run.py"]
+        crashlog.report(*_caught(RuntimeError("켜기 실패 B")), "main")
+        out.append(check("★ 창이 뜨기 전 실패 — 자동 켜기면 창 없이, 사람이 켰으면 알림 창 한 번",
+                         boxes == [crashlog.START_FAIL_TEXT], str(boxes)))
+        source = (ROOT / "utils" / "crashlog.py").read_text(encoding="utf-8")
+        out.append(check("설정·utils 를 부르지 않는다 (설정이 깨져도 남긴다)",
+                         "import config" not in source and "from config" not in source
+                         and "from utils" not in source))
+        entry = (ROOT / "main_run.py").read_text(encoding="utf-8")
+        out.append(check("main_run 은 한 벌 확인보다 먼저 훅을 건다",
+                         0 < entry.find("crashlog.install()") < entry.find("instance.acquire()")))
+    finally:
+        (sys.excepthook, threading.excepthook, crashlog._installed, crashlog._log_dir, crashlog._notifier,
+         seen, crashlog._notified, crashlog._message_box, sys.argv) = keep
+        crashlog._seen.clear()
+        crashlog._seen.update(seen)
+        shutil.rmtree(folder, ignore_errors=True)
+    return out
 
 
 def check_clock() -> list[bool]:
@@ -281,7 +357,8 @@ def _sha(path: Path) -> bytes:
 
 def main() -> int:
     setup_logging()
-    results = check_driver() + check_hand_over() + check_entry() + check_instance() + check_clock()
+    results = (check_driver() + check_hand_over() + check_entry() + check_instance() + check_crashlog()
+               + check_clock())
     if "--exe" in sys.argv:
         global EXE
         after = sys.argv[sys.argv.index("--exe") + 1:]

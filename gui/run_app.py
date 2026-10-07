@@ -42,7 +42,7 @@ from gui.erpia_app import SOURCE_EXCEL, SOURCE_SITE, ErpiaWindow
 from collect import sites
 from orchestrator import erpia_flow, full_flow, history, modules, remote, telemetry
 from orchestrator.common import Result
-from utils import autorun, autostart, instance, process, schedule
+from utils import autorun, autostart, crashlog, instance, process, schedule
 from utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -117,7 +117,7 @@ PRECHECK_BEFORE = 30 * 60       # 예약 몇 초 전부터
 PRECHECK_AGAIN = 5 * 60         # 다시 보는 주기
 PRECHECK_MIN_LEAD = 2 * 60      # 이보다 가까우면 안 본다 — 회차의 사전 점검과 휴대폰 연결 앱을 같이 만지지 않게
 PRECHECK_GIVE_UP = 2 * 60       # 점검이 이만큼 안 끝나면 '확인 못 함'
-NOTICE_ERPIA, NOTICE_PHONE = "erpia", "phone"
+NOTICE_ERPIA, NOTICE_PHONE, NOTICE_CRASH = "erpia", "phone", "crash"
 # [멈춘 곳부터 다시] (10-01) — 지난 실행이 멈춘 기능부터 끝까지 한 번. 저장된 실행할 기능은 바꾸지 않는다
 RERUN_TEXT = "멈춘 곳부터 다시"     # ★ RESUME_TEXT 는 overlay 의 [계속하기] 다 — 같은 이름을 쓰면 덮는다
 RERUN_TRIGGER = "이어서 실행"       # 리포트·[실행 기록]·서버의 '어떻게'
@@ -1221,6 +1221,15 @@ class RunWindow(ErpiaWindow):
         self._notice, self._notice_kind, self._notice_var = top, kind, var
         return var
 
+    def show_crash(self, text: str) -> None:
+        """처리 안 된 예외 알림 (`utils/crashlog.py`, 10-07). GUI 스레드에서만.
+        실행 중·무인이면 창 없이 상태줄만 — 맨 위 창이 ERPia 클릭을 가로챈다. 다른 알림 창은 덮지 않는다."""
+        if self.busy or self.unattended:
+            self.status_var.set(text)
+            return
+        if self._notice is None or self._notice_kind == NOTICE_CRASH:
+            self._show_notice(NOTICE_CRASH, "문제가 생겼습니다", [("닫기", self._close_notice)]).set(text)
+
     def _close_notice(self) -> None:
         notice, self._notice, self._notice_kind = self._notice, None, ""
         if notice is not None:
@@ -1710,6 +1719,7 @@ def run() -> int:
     log_locked_ignored()
 
     root = tk.Tk()
+    root.report_callback_exception = crashlog.tk_handler      # 기본값은 보이지 않는 stderr 로 찍는다 (10-07)
     try:
         ttk.Style().theme_use("vista")
     except tk.TclError:
@@ -1717,6 +1727,14 @@ def run() -> int:
 
     apply_scaling(root)
     window = RunWindow(root)
+
+    def _post_crash(text: str) -> None:         # 어느 스레드에서든 — GUI 스레드로 넘긴다
+        try:
+            root.after(0, window.show_crash, text)
+        except (RuntimeError, tk.TclError) as exc:      # 창이 닫혔거나 메인 루프 밖
+            log.warning("문제 알림을 넘기지 못했다: %s", exc)
+
+    crashlog.set_notifier(_post_crash)
     window.start_autorun()
     # 자동 켜기가 띄운 것이면 작게 뜬다 (09-28). 사람이 연 것이면 처음 한 번 자동 켜기를 묻는다
     if autostart.BACKGROUND in sys.argv[1:]:
@@ -1727,6 +1745,7 @@ def run() -> int:
     window.ensure_autostart()
     root.after(0, _log_startup)
     root.mainloop()
+    crashlog.set_notifier(None)
     return 0
 
 

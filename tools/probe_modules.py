@@ -375,9 +375,35 @@ def check_window() -> list[bool]:
         out += check_busy_lock(window)
         out += check_pre_run(window)
         out += check_rerun(window)
+        out += check_crash_notice(window)
     finally:
         root.destroy()
     out += check_small_screen()
+    return out
+
+
+def check_crash_notice(window) -> list[bool]:
+    """처리 안 된 예외 알림 (10-07, `utils/crashlog.py` → `RunWindow.show_crash`)."""
+    from gui import run_app
+
+    out = []
+    keep = (window.busy, window.unattended, window.status_var.get())
+    try:
+        window._close_notice()
+        window.busy = True
+        window.show_crash("가짜 알림")
+        out.append(check("실행 중이면 창 없이 상태줄만", window._notice is None
+                         and window.status_var.get() == "가짜 알림"))
+        window.busy = False
+        window.show_crash("가짜 알림")
+        out.append(check("한가하면 알림 창이 뜬다", window._notice_kind == run_app.NOTICE_CRASH))
+        window._show_notice(run_app.NOTICE_ERPIA, "곧 예약 실행", [("닫기", window._close_notice)])
+        window.show_crash("가짜 알림")
+        out.append(check("예약 전 경고 창이 떠 있으면 덮지 않는다", window._notice_kind == run_app.NOTICE_ERPIA))
+    finally:
+        window._close_notice()
+        window.busy, window.unattended = keep[0], keep[1]
+        window.status_var.set(keep[2])
     return out
 
 

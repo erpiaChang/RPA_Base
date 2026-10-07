@@ -34,10 +34,10 @@
 
 | 고친 곳 | 돌릴 것 (건수) |
 | --- | --- |
-| 흐름·단계·결과 문구 (`orchestrator/`) | `probe_progress` 47 · `probe_failure` 54 · `probe_pipeline` 41 · `probe_report` 12 · `probe_modules` 90 (실행 창 흐름·기능 선택·메일 실패 뒤 계속) |
-| **사용자에게 보이는 글** (어디든) | `probe_userlog` 114 — **필수** |
+| 흐름·단계·결과 문구 (`orchestrator/`) | `probe_progress` 47 · `probe_failure` 54 · `probe_pipeline` 41 · `probe_report` 12 · `probe_modules` 93 (실행 창 흐름·기능 선택·메일 실패 뒤 계속) |
+| **사용자에게 보이는 글** (어디든) | `probe_userlog` 115 — **필수** |
 | ERPia 조작 (`automation/`, `utils/ui.py`) | `probe_hold_loop` 53 · `probe_rect_settle` 27 · `probe_failure` 54 |
-| 창·화면 (`gui/`) | `probe_gui`(실패 0) · `probe_modules` 90 · `probe_overlay` 81(화면이 잠겨 있으면 73) · `probe_history` 19 — **찍어서 본다** (`probe_shot --stages`, `probe_modules --shot`) |
+| 창·화면 (`gui/`) | `probe_gui`(실패 0) · `probe_modules` 93 · `probe_overlay` 81(화면이 잠겨 있으면 73) · `probe_history` 19 — **찍어서 본다** (`probe_shot --stages`, `probe_modules --shot`) |
 | 색·글자 크기 | `probe_contrast` 60 — **필수** |
 | 예약·자동 실행 | `probe_schedule` 97 · `probe_autorun` 59 |
 | 수집 (`collect/`) · 비밀번호 감싸기 | `probe_phone_wait` 48 · `probe_webmail` 17 · `probe_secret` 37 (사이트 전용은 git 밖 `tools.local.*`) |
@@ -47,7 +47,7 @@
 | 원격 설정·명령 (`orchestrator/remote.py`, `run_app` 원격 부분) · 설정 파일 읽기·저장 | `probe_remote` 56 — **필수** |
 | 웹 (`web/`) | `probe_web` 63 · `probe_web_shot` 15 (찍어서 본다) — **필수** |
 | LLM 워커 (`llm/`) | `probe_llm` 42 — **필수** (속도·답은 `python llm\worker.py --bench`) |
-| 켜기 (`utils/autostart.py`·`utils/instance.py`·`main_run.py`·`collect/pw_driver.py`·`build_run.spec`) | `probe_startup` 27 — **필수** (빌드 뒤 `--exe --browser`) |
+| 켜기 (`utils/autostart.py`·`utils/instance.py`·`utils/crashlog.py`·`main_run.py`·`collect/pw_driver.py`·`build_run.spec`) | `probe_startup` 35 — **필수** (빌드 뒤 `--exe --browser`) |
 | 훅 (`.claude/hooks`) | `probe_hooks` 134 — **필수** |
 | 커밋·push (git 에 실값이 없나) | `probe_leaks --selftest` 44 · 인자 없이 걸린 줄 0 — 커밋 전·push 전 훅이 `--staged`·`--pre-push` 로 돈다 |
 

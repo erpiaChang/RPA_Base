@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import sys
 
-from utils import instance
+from utils import crashlog, instance
 
 if __name__ == "__main__":
+    crashlog.install()                      # 켜는 중 import 실패(설정 깨짐 등)·창의 예외도 logs 에 남긴다 (10-07)
     args = sys.argv[1:]
     if not instance.acquire():
         if "--background" not in args:
