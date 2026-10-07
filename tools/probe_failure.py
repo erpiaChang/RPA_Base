@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -181,6 +182,8 @@ def main() -> int:
     results += _check_selected_sales_menu()
     results += _check_sales_mode()
     results += _check_resume_from()
+    results += _check_collect_wait()
+    results += _check_real_popup()
 
     log.info("결과: 통과 %d / 실패 %d", sum(results), len(results) - sum(results))
     log.info("★ 여기서 확인한 것은 **흐름 틀의 실패 처리**다. 각 업무 단계가 "
@@ -682,6 +685,169 @@ def _check_report(hooks) -> list[bool]:
         # 조사하고 나온 것은 남기지 않는다.
         if path and Path(path).exists():
             Path(path).unlink()
+    return out
+
+
+class _FakeButton:
+    """매출처리 버튼 자리. `states` 를 차례로 돌려준다 — 예외면 그것을 올린다(요소가 사라짐)."""
+
+    def __init__(self, states):
+        self.states = list(states)
+        self.last = self.states[-1]
+
+    def is_enabled(self):
+        value = self.states.pop(0) if self.states else self.last
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
+class _FakeScreen:
+    def __init__(self, pid=4242):
+        self.pid = pid
+
+    def top_level_parent(self):
+        return SimpleNamespace(handle=1)
+
+    def process_id(self):
+        return self.pid
+
+
+def _check_collect_wait() -> list[bool]:
+    """자동수집 대기 (10-07) — 대기 중 알림 닫기·버튼을 못 읽으면 끝난 것으로 보지 않기. 화면은 가짜다."""
+    from automation import order_mapping as om
+    from config.settings import SETTINGS
+    from utils import winprobe
+
+    log.info("▶ 자동수집 대기 — 알림 감시·버튼 읽기 실패 (가짜 화면)")
+    keep = (om._sales_button, om.dialogs.dismiss_message_box, winprobe.top_windows, om.POPUP_CHECK_INTERVAL,
+            SETTINGS.timeouts.collect_settle, SETTINGS.timeouts.poll_interval, om.collect_checks, om._collect_progress)
+    out = []
+    try:
+        SETTINGS.timeouts.collect_settle, SETTINGS.timeouts.poll_interval = 0.02, 0.005
+        om.collect_checks = lambda screen: (0, 0, 0)            # 진행 로그용 — 가짜 화면에는 수집로그가 없다
+        om._collect_progress = lambda screen: "가짜"
+        om.POPUP_CHECK_INTERVAL = 0
+        dismissed: list = []
+        om.dialogs.dismiss_message_box = lambda window: dismissed.append(window.handle) or "ERPia: 가짜 알림"
+        popup = SimpleNamespace(handle=2)
+        windows = iter([[popup]] * 3 + [[]] * 1000)
+        winprobe.top_windows = lambda pid=None, visible_only=True: next(windows)
+        buttons = [_FakeButton([False] * 30 + [True])]
+        om._sales_button = lambda screen: buttons[-1]
+        om.wait_collect_done(_FakeScreen(), timeout=10)
+        out.append(check("★ 대기 중 메인 창 말고 뜬 창이 있으면 알림 닫기를 부른다 — 같은 창 묶음은 한 번만",
+                         dismissed == [1], str(dismissed)))
+
+        refound: list = []
+        lost = RuntimeError("가짜 — 요소가 사라짐")
+        first = _FakeButton([False, lost, lost, lost])     # 회색이다가 읽을 수 없게 된다
+
+        def find(screen):
+            refound.append(1)
+            return first if len(refound) == 1 else _FakeButton([False] * 5 + [True])
+        om._sales_button = find
+        winprobe.top_windows = lambda pid=None, visible_only=True: []
+        om.wait_collect_done(_FakeScreen(), timeout=10)
+        out.append(check("★ 버튼을 못 읽으면 끝난 것으로 보지 않고 다시 찾는다", len(refound) >= 2, str(len(refound))))
+
+        refound.clear()
+        om._sales_button = lambda screen: refound.append(1) or (
+            _FakeButton([lost]) if len(refound) == 1 else _FakeButton([False] * 5 + [True]))
+        om.wait_collect_done(_FakeScreen(), timeout=10)
+        out.append(check("처음부터 못 읽으면 '진행 중인 수집 없음' 으로 넘기지 않는다", len(refound) >= 2, str(len(refound))))
+
+        om._sales_button = lambda screen: _FakeButton([False])
+        try:
+            om.wait_collect_done(_FakeScreen(), timeout=0.3)
+            timed_out = False
+        except om.ScreenError:
+            timed_out = True
+        out.append(check("끝나지 않으면 상한에서 멈춘다 (무한 대기 없음)", timed_out))
+    finally:
+        (om._sales_button, om.dialogs.dismiss_message_box, winprobe.top_windows, om.POPUP_CHECK_INTERVAL,
+         SETTINGS.timeouts.collect_settle, SETTINGS.timeouts.poll_interval, om.collect_checks,
+         om._collect_progress) = keep
+    return out
+
+
+# 가짜 ERPia — WinForms 는 컨트롤 Name 을 UIA AutomationId 로 낸다. 그래서 ERPia 메시지 팝업과 같은 auto_id 를 낼 수 있다.
+# 이 프로세스의 창만 건드린다 (실제 ERPia 는 보지 않는다). 글은 ASCII — 명령줄 인코딩을 타지 않게.
+_FAKE_APP = r"""
+Add-Type -AssemblyName System.Windows.Forms
+$main = New-Object System.Windows.Forms.Form
+$main.Name = 'FakeErpiaMain'; $main.Text = 'comp01 - user01 FAKE'; $main.Width = 420; $main.Height = 260
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 300
+$timer.Add_Tick({
+  $timer.Stop()
+  foreach ($kind in @('ok', 'yesno')) {
+    $p = New-Object System.Windows.Forms.Form
+    $p.Name = 'Popup_ERPiaMessageBox'; $p.Text = 'ERPia'; $p.Width = 300; $p.Height = 160
+    $label = New-Object System.Windows.Forms.Label
+    $label.Name = 'lbl_Message'; $label.Text = "FAKE notice $kind"; $label.AutoSize = $true
+    $p.Controls.Add($label)
+    $names = if ($kind -eq 'ok') { @('OK') } else { @('Yes', 'No') }
+    $left = 10
+    foreach ($text in $names) {
+      $b = New-Object System.Windows.Forms.Button
+      $b.Name = "btn_$text"; $b.Text = $text; $b.Top = 50; $b.Left = $left; $left += 90
+      $b.Add_Click({ $this.FindForm().Close() })
+      $p.Controls.Add($b)
+    }
+    [void]$p.ShowDialog($main)
+  }
+})
+$main.Add_Shown({ $timer.Start() })
+[System.Windows.Forms.Application]::Run($main)
+"""
+
+
+def _check_real_popup() -> list[bool]:
+    """진짜 창으로 알림 닫기 (10-07) — 가짜 ERPia(WinForms)의 [OK] 하나 팝업은 닫고, [Yes]/[No] 는 누르지 않는다."""
+    import base64
+    import subprocess
+
+    from pywinauto import Application
+
+    from automation import order_mapping as om
+    from utils import dialogs, process, winprobe
+    from utils.wait import wait_for
+
+    log.info("▶ 진짜 창 — 가짜 ERPia 팝업 닫기 (WinForms, 이 시험의 프로세스만)")
+    if process.screen_locked():
+        log.info("  건너뜀  화면이 잠겨 있어 진짜 창 시험을 못 한다")
+        return []
+    encoded = base64.b64encode(_FAKE_APP.encode("utf-16-le")).decode("ascii")
+    fake = subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            creationflags=subprocess.CREATE_NO_WINDOW)
+    out = []
+    try:
+        handle = wait_for(lambda: next((w.handle for w in winprobe.top_windows(fake.pid)
+                                        if w.title.endswith("FAKE")), None), "가짜 ERPia 창", timeout=30)
+        main = Application(backend="uia").connect(process=fake.pid).window(handle=handle).wrapper_object()
+        wait_for(lambda: dialogs._message_box(main), "가짜 [OK] 팝업", timeout=10)
+        watch = {"next": 0.0, "seen": frozenset()}
+        om._close_popups(main, watch)
+        reopened = wait_for(lambda: dialogs._message_box(main), "가짜 [Yes]/[No] 팝업", timeout=10)
+        out.append(check("★ [OK] 하나뿐인 팝업은 수집 대기 중에 닫는다 (진짜 UIA)",
+                         "Yes" in dialogs.buttons_of(reopened), str(dialogs.buttons_of(reopened))))
+        watch["next"] = 0.0
+        om._close_popups(main, watch)
+        out.append(check("★ [Yes]/[No] 처럼 고르는 팝업은 누르지 않는다", dialogs._message_box(main) is not None))
+        watch["next"] = 0.0
+        calls: list = []
+        keep = dialogs.dismiss_message_box
+        dialogs.dismiss_message_box = lambda window: calls.append(1)
+        try:
+            om._close_popups(main, watch)
+        finally:
+            dialogs.dismiss_message_box = keep
+        out.append(check("같은 창 묶음이면 다시 찾지 않는다 (UIA 비용)", not calls))
+    finally:
+        fake.kill()
+        fake.wait(timeout=10)
     return out
 
 

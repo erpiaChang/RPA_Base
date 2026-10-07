@@ -125,6 +125,7 @@ STATUS_COLUMN = "상태"              # 수집로그 그리드
 MARKET_COLUMN = "마켓명"            # 수집로그 그리드 — 실패한 사이트를 이름으로 알린다
 COLLECTED_COLUMN = "수집여부"        # 수집로그 그리드의 체크박스 컬럼
 PROGRESS_LOG_INTERVAL = 60.0        # 수집 대기 중 진행 상황 로그 간격(초)
+POPUP_CHECK_INTERVAL = 10.0         # 수집 대기 중 ERPia 알림을 보는 간격(초, 10-07)
 # 수집로그 상태 중 **사람이 볼 필요가 있는 것**. 이름이 확정되지 않아 넓게 잡는다.
 #
 # ★ 이름이 `실패` 라고 **결함이라는 뜻이 아니다.** 아래 "수집 상태의 실제 의미" 참고.
@@ -724,7 +725,7 @@ def wait_upload_settled(screen) -> bool:
     중이므로 **완료까지 기다린다.** 기다리는 조건은 그대로 두고, 헛기다림만 줄인다.
     """
     button = _sales_button(screen)
-    if _enabled_stable(button):
+    if _enabled_stable(lambda: ui.is_enabled(button)):
         log.info("업로드 후 유휴 확인 — 다음으로 넘어간다.")
         return True
 
@@ -1589,15 +1590,48 @@ def _has_cell(row, column: str) -> bool:
         return False
 
 
-def _enabled_stable(button, seconds: float | None = None) -> bool:
-    """버튼이 `seconds` 동안 계속 활성인지 확인한다.
+def _enabled_stable(read, seconds: float | None = None) -> bool:
+    """버튼이 `seconds` 동안 계속 활성인지 확인한다. `read()` 는 지금 활성인지.
 
     [가져오기] 후 버튼이 회색이 되기까지 몇 초 걸린다. 한 번만 보고 판단하면
     그 틈에 "완료"로 오판한다. 잠깐이라도 비활성이면 아직 끝난 게 아니다.
     """
     seconds = SETTINGS.timeouts.collect_settle if seconds is None else seconds
     # 폴링 대기는 utils/wait.py 안에만 둔다. 업무 코드에 고정 대기를 두지 않는다.
-    return stays_true(lambda: ui.is_enabled(button), "버튼 활성 유지", seconds)
+    return stays_true(read, "버튼 활성 유지", seconds)
+
+
+def _strict_enabled(screen, holder: dict):
+    """매출처리 버튼이 활성인지 — **읽지 못하면 끝난 것으로 보지 않는다** (10-07).
+    `ui.is_enabled` 는 읽기 실패를 활성으로 본다(누르기 전 판정용). 완료 판정에서는 그것이 거짓 '수집 끝' 이 되므로,
+    실패하면 단추를 다시 찾고 예외를 올린다 — `wait_for` 가 '아직' 으로 보고 다시 본다."""
+    def read() -> bool:
+        try:
+            return bool(holder["button"].is_enabled())
+        except Exception as exc:        # noqa: BLE001 — 요소가 사라짐(COMError 등). 다시 찾고 올린다
+            log.debug("매출처리 버튼 상태를 읽지 못했다 — 다시 찾는다: %s", exc)
+            holder["button"] = _sales_button(screen)
+            raise
+    return read
+
+
+def _close_popups(screen, watch: dict) -> None:
+    """수집 대기 중 뜬 ERPia 알림 (10-07). 알림이 메인 창을 잠그면 매출처리 버튼이 영영 회색으로 보인다
+    (다른 RPA 실사고 — 알림을 못 보고 414초). [확인] 하나뿐인 알림만 닫는다 (`dialogs.dismiss_message_box`, 09-22 규칙).
+    고르는 알림은 누르지 않는다. 먼저 Win32 로 메인 창 말고 뜬 창이 있나 본다(싸다) — 같은 창 묶음은 한 번만 UIA 로 본다."""
+    now = time.monotonic()
+    if now < watch["next"]:
+        return
+    watch["next"] = now + POPUP_CHECK_INTERVAL
+    main = screen.top_level_parent()
+    others = frozenset(w.handle for w in winprobe.top_windows(screen.process_id()) if w.handle != main.handle)
+    if others == watch["seen"]:
+        return
+    watch["seen"] = others
+    if others:
+        closed = dialogs.dismiss_message_box(main)
+        if closed:
+            log.warning("수집 대기 중 ERPia 알림을 닫았다 — %s", closed)
 
 
 def wait_collect_done(screen, timeout: float | None = None) -> None:
@@ -1617,14 +1651,20 @@ def wait_collect_done(screen, timeout: float | None = None) -> None:
     행이 UIA에 없고, 사이트마다 끝나는 순서가 달라 마지막 행만 봐서도 안 된다.
     """
     timeout = SETTINGS.timeouts.collect if timeout is None else timeout
-    button = _sales_button(screen)
+    enabled = _strict_enabled(screen, {"button": _sales_button(screen)})
 
-    if _enabled_stable(button):
+    try:
+        idle = _enabled_stable(enabled)
+    except Exception as exc:            # noqa: BLE001 — 읽지 못했다. 아래 대기에서 다시 본다
+        log.debug("수집 진행 여부를 바로 판정하지 못했다: %s", exc)
+        idle = False
+    if idle:
         log.info("매출처리 버튼이 활성 상태로 유지된다. 진행 중인 수집이 없다.")
         return
 
     started = time.monotonic()
     state = {"next_log": started}
+    watch = {"next": started, "seen": frozenset()}
     log.info(
         "주문수집이 진행 중이다. 끝날 때까지 기다린다 (최대 %.1f시간).",
         timeout / 3600,
@@ -1644,7 +1684,11 @@ def wait_collect_done(screen, timeout: float | None = None) -> None:
 
     def done() -> bool:
         report()
-        return _enabled_stable(button)
+        try:
+            _close_popups(screen, watch)
+        except Exception as exc:        # noqa: BLE001 — 알림을 못 봐도 완료 판정은 한다
+            log.debug("수집 대기 중 알림을 보지 못했다: %s", exc)
+        return _enabled_stable(enabled)
 
     try:
         wait_for(done, f"{SALES_BUTTON_TITLE} 버튼 활성(수집 완료)", timeout=timeout)
