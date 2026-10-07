@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 ERROR_ALREADY_EXISTS = 183
+ERROR_ACCESS_DENIED = 5     # 다른 권한(관리자)으로 뜬 벌의 뮤텍스는 열 수 없다 — 떠 있다는 뜻 (10-07)
 _handle = None      # 프로세스가 끝날 때까지 쥐고 있는다. 놓으면 다음 벌이 뜬다
 
 
@@ -33,14 +34,21 @@ def acquire(path: Path | None = None) -> bool:
     # use_last_error — 호출 직후의 오류값을 ctypes 가 붙잡아 둔다 (따로 GetLastError 를 부르면 그 사이 바뀔 수 있다)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.CreateMutexW.restype = ctypes.c_void_p
+    ctypes.set_last_error(0)            # 앞선 호출의 오류값으로 오판하지 않게
     handle = kernel32.CreateMutexW(None, False, mutex_name(path or exe_path()))
-    if not handle:
-        return True                     # 만들지 못했다 — 막을 근거가 없으니 뜬다
-    if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
-        kernel32.CloseHandle(ctypes.c_void_p(handle))
+    if is_second(handle, ctypes.get_last_error()):
+        if handle:
+            kernel32.CloseHandle(ctypes.c_void_p(handle))
         return False
+    if not handle:
+        return True                     # 그 밖의 이유로 만들지 못했다 — 막을 근거가 없으니 뜬다
     _handle = handle
     return True
+
+
+def is_second(handle, error: int) -> bool:
+    """이미 같은 경로의 프로그램이 떠 있나. 만들지 못했는데 접근 거부면 다른 권한의 벌이 쥐고 있다."""
+    return error == (ERROR_ALREADY_EXISTS if handle else ERROR_ACCESS_DENIED)
 
 
 def release() -> None:

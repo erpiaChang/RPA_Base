@@ -190,6 +190,15 @@ def _run_entry(frozen: bool, args: list[str], acquire: list[bool], handed: bool 
     return calls
 
 
+def check_instance() -> list[bool]:
+    log.info("▶ 한 벌만 — 뮤텍스 판정 (10-07, 권한이 다른 벌)")
+    second = instance.is_second
+    return [check("★ 만들지 못했는데 접근 거부면 다른 권한의 벌이 떠 있다", second(None, instance.ERROR_ACCESS_DENIED)),
+            check("그 밖의 이유로 못 만들면 뜬다", not second(None, 0)),
+            check("만들었는데 이미 있으면 둘째다", second(1, instance.ERROR_ALREADY_EXISTS)),
+            check("처음 만들었으면 뜬다", not second(1, 0))]
+
+
 def check_clock() -> list[bool]:
     log.info("▶ 켜는 데 걸린 시간 — 프로세스 생성 시각")
     started = process.created_epoch(os.getpid())
@@ -272,7 +281,7 @@ def _sha(path: Path) -> bytes:
 
 def main() -> int:
     setup_logging()
-    results = check_driver() + check_hand_over() + check_entry() + check_clock()
+    results = check_driver() + check_hand_over() + check_entry() + check_instance() + check_clock()
     if "--exe" in sys.argv:
         global EXE
         after = sys.argv[sys.argv.index("--exe") + 1:]

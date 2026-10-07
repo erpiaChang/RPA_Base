@@ -47,7 +47,7 @@
 | 원격 설정·명령 (`orchestrator/remote.py`, `run_app` 원격 부분) · 설정 파일 읽기·저장 | `probe_remote` 56 — **필수** |
 | 웹 (`web/`) | `probe_web` 63 · `probe_web_shot` 15 (찍어서 본다) — **필수** |
 | LLM 워커 (`llm/`) | `probe_llm` 42 — **필수** (속도·답은 `python llm\worker.py --bench`) |
-| 켜기 (`utils/autostart.py`·`main_run.py`·`collect/pw_driver.py`·`build_run.spec`) | `probe_startup` 23 — **필수** (빌드 뒤 `--exe --browser`) |
+| 켜기 (`utils/autostart.py`·`utils/instance.py`·`main_run.py`·`collect/pw_driver.py`·`build_run.spec`) | `probe_startup` 27 — **필수** (빌드 뒤 `--exe --browser`) |
 | 훅 (`.claude/hooks`) | `probe_hooks` 134 — **필수** |
 | 커밋·push (git 에 실값이 없나) | `probe_leaks --selftest` 44 · 인자 없이 걸린 줄 0 — 커밋 전·push 전 훅이 `--staged`·`--pre-push` 로 돈다 |
 
