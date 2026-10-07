@@ -408,9 +408,11 @@ def check_friendly() -> list[bool]:
     out.append(check("목록에 있는 이름을 같이 보여 준다", "목록에 있는 이름: 박스A, 박스B, 박스C" in got, got))
     from utils import crashlog
 
-    found = leaks({"lines": [crashlog.CRASH_TEXT, crashlog.START_FAIL_TEXT], "statuses": [], "summary": "",
-                   "failure": "", "steps": []})
-    out.append(check("처리 안 된 예외 알림 글에 내부 값이 없다 (10-07)", not found, str(found)))
+    from orchestrator import telemetry
+
+    found = leaks({"lines": [crashlog.CRASH_TEXT, crashlog.START_FAIL_TEXT, telemetry.CERT_FAIL_TEXT],
+                   "statuses": [], "summary": "", "failure": "", "steps": []})
+    out.append(check("처리 안 된 예외·서버 인증서 알림 글에 내부 값이 없다 (10-07)", not found, str(found)))
 
     log.info("▶ 암호 걸린 엑셀 알아보기 (파일 머리 8바이트)")
     from automation.order_mapping import OLE_SIGNATURE, password_state

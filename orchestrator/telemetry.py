@@ -24,11 +24,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import ssl
+import subprocess
 import threading
 import time
 import uuid
 from pathlib import Path
-from urllib import error, request
+from urllib import error, parse, request
 
 from config.settings import APP_VERSION, LOG_DIR
 from orchestrator import steps
@@ -49,6 +52,9 @@ HEARTBEAT_SECONDS = 30.0    # 도는 동안
 OUTBOX_RETRY_SECONDS = 300.0
 FINISH_WAIT_SECONDS = 5.0   # finish() 가 큐 비우기를 기다리는 상한
 REQUEST_TIMEOUT = 5.0
+WARM_TIMEOUT = 15           # 루트 인증서 채우기(PowerShell) 한 번의 상한(초)
+CERT_FAIL_TEXT = ("서버와 안전하게 연결하지 못했습니다 (보안 인증서를 확인하지 못함). "
+                  "Windows 업데이트를 하고 PC 의 날짜·시간이 맞는지 확인하세요. 잠시 뒤 다시 시도합니다.")
 OUTBOX_KEEP_LINES = 1000
 OUTBOX_KEEP_SECONDS = 24 * 3600
 TEXT_LIMIT = 300            # 서버 컬럼 check 와 같다
@@ -105,6 +111,8 @@ def verify(settings, *, post=None) -> tuple[str, str]:
     try:
         status, _ = (post or _http_post)(url + INGEST, anon, payload)
     except Exception as exc:                            # noqa: BLE001 — 네트워크·타임아웃
+        if is_cert_error(exc):
+            return VERIFY_LATER, CERT_FAIL_TEXT
         return VERIFY_LATER, (f"서버에 연결하지 못했습니다 ({type(exc).__name__}). "
                               "인터넷 연결을 확인하세요. 잠시 뒤 다시 시도합니다.")
     if status == 401:
@@ -120,14 +128,69 @@ def verify(settings, *, post=None) -> tuple[str, str]:
     return VERIFY_OK, ""
 
 
+# ★ 갓 설치한 Windows 는 루트 인증서가 저장소에 다 없다 — Windows 는 자기(CryptoAPI) 검증 때만 받아 오고 파이썬 ssl 은
+#   그것을 일으키지 않는다 (10-07, 다른 RPA 가 샌드박스에서 겪음). 그래서 인증서 오류면 PowerShell 로 한 번 접속해
+#   Windows 가 받게 하고, 새 문맥(저장소를 다시 읽음)으로 한 번 더 보낸다. 검증은 끄지 않는다 (SERVER_PLAN D-10).
+_opener = None
+_warmed = False
+_net_lock = threading.Lock()
+
+
+def is_cert_error(exc: BaseException) -> bool:
+    return isinstance(getattr(exc, "reason", exc), ssl.SSLCertVerificationError)
+
+
+def _get_opener():
+    global _opener
+    with _net_lock:
+        if _opener is None:
+            _opener = request.build_opener(request.HTTPSHandler(context=ssl.create_default_context()))
+        return _opener
+
+
+def _warm_roots(url: str, *, run=subprocess.run) -> bool:
+    """Windows 가 이 서버의 루트 인증서를 받게 창 없이 한 번 접속한다 (프로세스당 1회, 응답은 안 본다). 했으면 True."""
+    global _warmed
+    with _net_lock:
+        if _warmed:
+            return False
+        _warmed = True
+    parts = parse.urlsplit(url)
+    if parts.scheme != "https" or not parts.netloc:
+        return False
+    # 3072 = TLS 1.2 (옛 Windows 10 의 PowerShell 5.1 기본은 TLS 1.0). 주소는 글에 넣지 않고 환경변수로 넘긴다
+    script = ("[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072; "
+              f"try {{ Invoke-WebRequest -Uri $env:RPA_WARM_URL -UseBasicParsing -TimeoutSec {WARM_TIMEOUT} "
+              "| Out-Null } catch { }")
+    log.info("서버 인증서 오류 — Windows 가 루트 인증서를 받게 한 번 접속한다")
+    try:
+        run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=WARM_TIMEOUT + 10, creationflags=subprocess.CREATE_NO_WINDOW,
+            env=dict(os.environ, RPA_WARM_URL=f"{parts.scheme}://{parts.netloc}/"))
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("루트 인증서 채우기를 하지 못했다(그대로 진행): %s", exc)
+    return True
+
+
 def _http_post(url: str, anon_key: str, payload: bytes, limit: int = 1000) -> tuple[int, str]:
+    global _opener
     req = request.Request(url, data=payload, method="POST",
                           headers={"apikey": anon_key, "Content-Type": "application/json"})
-    try:
-        with request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:      # noqa: S310 — https 고정
-            return resp.status, resp.read(limit).decode("utf-8", "replace")
-    except error.HTTPError as exc:
-        return exc.code, exc.read(400).decode("utf-8", "replace")
+    for attempt in (0, 1):
+        try:
+            with _get_opener().open(req, timeout=REQUEST_TIMEOUT) as resp:     # https 고정, 검증 켬
+                return resp.status, resp.read(limit).decode("utf-8", "replace")
+        except error.HTTPError as exc:
+            return exc.code, exc.read(400).decode("utf-8", "replace")
+        except error.URLError as exc:
+            if not is_cert_error(exc):
+                raise
+            with _net_lock:
+                _opener = None                  # 다음 요청은 지금의 Windows 저장소로 새 문맥
+            if attempt or not _warm_roots(url):
+                raise
+    raise AssertionError("unreachable")
 
 
 def _cut(text: object) -> str:

@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import ssl
+import subprocess
 import sys
 import threading
 import time
@@ -521,6 +523,92 @@ def check_verify(server: FakeServer) -> list[bool]:
     return out
 
 
+class _Resp:
+    status = 200
+
+    def read(self, limit):
+        return b"{}"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def check_cert() -> list[bool]:
+    """서버 인증서 오류 (10-07) — 따로 문구, Windows 루트 채우기 1회, 새 문맥으로 한 번 더. 진짜 PowerShell 은 안 띄운다."""
+    log.info("▶ 서버 인증서 오류 — 구분 문구·루트 채우기 1회·다시 보내기")
+    from types import SimpleNamespace
+    from urllib import error
+
+    cert = error.URLError(ssl.SSLCertVerificationError(1, "가짜 — 인증서를 확인하지 못함"))
+    fake = SimpleNamespace(server_url="https://x.example", server_anon_key="anon", server_build_id="bld_x")
+
+    def failing(exc):
+        def post(*args, **kwargs):
+            raise exc
+        return post
+
+    state, text = telemetry.verify(fake, post=failing(cert))
+    out = [check("인증서 오류는 '보안 인증서' 문구 — 인터넷 연결 탓이 아니다",
+                 state == telemetry.VERIFY_LATER and "보안 인증서" in text and "인터넷" not in text, text[:50])]
+    state, text = telemetry.verify(fake, post=failing(ConnectionRefusedError()))
+    out.append(check("그 밖의 연결 실패는 기존 문구", state == telemetry.VERIFY_LATER and "인터넷 연결" in text))
+
+    keep = (telemetry._get_opener, telemetry._warm_roots, telemetry._warmed, telemetry._opener)
+    warms: list[str] = []
+    opens: list[int] = []
+
+    class Opener:
+        def __init__(self, fails):
+            self.fails = fails
+
+        def open(self, req, timeout):
+            opens.append(1)
+            if next(self.fails):
+                raise cert
+            return _Resp()
+
+    try:
+        fails = iter([True, False])
+        telemetry._get_opener = lambda: Opener(fails)
+        telemetry._warm_roots = lambda url: warms.append(url) or True
+        status, _ = telemetry._http_post("https://x.example/rest", "anon", b"{}")
+        out.append(check("★ 인증서 오류 → 루트 채우기 1회 → 새 문맥으로 다시 보내 200",
+                         status == 200 and len(warms) == 1 and len(opens) == 2, f"{status}/{warms}/{opens}"))
+        opens.clear()
+        telemetry._get_opener = lambda: Opener(iter([True] * 3))
+        telemetry._warm_roots = lambda url: False            # 이미 했다
+        try:
+            telemetry._http_post("https://x.example/rest", "anon", b"{}")
+            raised = False
+        except error.URLError:
+            raised = True
+        out.append(check("이미 채웠으면 다시 하지 않고 오류를 올린다 (한 번만 보낸다)", raised and len(opens) == 1))
+
+        telemetry._warm_roots, telemetry._warmed = keep[1], False
+        calls = []
+
+        def fake_run(*args, **kwargs):
+            calls.append((args, kwargs))
+
+        did = telemetry._warm_roots("https://x.example/rest/v1/rpc/ingest", run=fake_run)
+        again = telemetry._warm_roots("https://x.example/", run=fake_run)
+        args, kw = calls[0] if calls else (((),), {})
+        out.append(check("PowerShell 은 창 없이·시간 상한·주소는 환경변수로, 프로세스당 1번",
+                         did and not again and len(calls) == 1
+                         and kw.get("creationflags") == subprocess.CREATE_NO_WINDOW and kw.get("timeout")
+                         and kw.get("stdin") == subprocess.DEVNULL and "x.example" not in " ".join(args[0])
+                         and kw.get("env", {}).get("RPA_WARM_URL") == "https://x.example/"))
+        telemetry._warmed = False
+        out.append(check("https 가 아니면 PowerShell 을 띄우지 않는다",
+                         telemetry._warm_roots("http://127.0.0.1:9/", run=fake_run) is False and len(calls) == 1))
+    finally:
+        telemetry._get_opener, telemetry._warm_roots, telemetry._warmed, telemetry._opener = keep
+    return out
+
+
 def main() -> int:
     setup_logging()
     server = FakeServer()
@@ -528,7 +616,7 @@ def main() -> int:
         results = [*check_flow(server), *check_dry_and_none(server), *check_outbox(server),
                    *check_idle_skip_heartbeat(server), *check_alert(server), *check_slow(server),
                    *check_settings_and_window(),
-                   *check_verify(server)]
+                   *check_verify(server), *check_cert()]
     finally:
         server.stop()
         OUTBOX.unlink(missing_ok=True)

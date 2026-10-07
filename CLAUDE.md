@@ -43,7 +43,7 @@
 | 수집 (`collect/`) · 비밀번호 감싸기 | `probe_phone_wait` 48 · `probe_webmail` 17 · `probe_secret` 37 (사이트 전용은 git 밖 `tools.local.*`) |
 | ERPia 업데이트·UAC | `probe_updater` 18 |
 | 빌드 프로그램·고정값 (`gui/build_app.py`, `LOCKED_KEYS`) | `probe_build` 35 |
-| 서버 보고 (`orchestrator/telemetry.py`) | `probe_telemetry` 61 — **필수** |
+| 서버 보고 (`orchestrator/telemetry.py`) | `probe_telemetry` 67 — **필수** |
 | 원격 설정·명령 (`orchestrator/remote.py`, `run_app` 원격 부분) · 설정 파일 읽기·저장 | `probe_remote` 56 — **필수** |
 | 웹 (`web/`) | `probe_web` 63 · `probe_web_shot` 15 (찍어서 본다) — **필수** |
 | LLM 워커 (`llm/`) | `probe_llm` 42 — **필수** (속도·답은 `python llm\worker.py --bench`) |
