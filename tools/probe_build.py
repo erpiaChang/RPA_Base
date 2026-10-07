@@ -260,6 +260,9 @@ def check_locked_keys() -> list[bool]:
 def check_register() -> list[bool]:
     """빌드를 서버에 등록해 빌드 ID 를 받는다 (09-28). 가짜 응답을 주입해 실서버를 부르지 않는다."""
     log.info("▶ 빌드 등록 — 관리자 로그인 → register_build")
+    import json
+    from types import SimpleNamespace
+
     from tools import register_build
 
     calls: list[tuple[str, dict]] = []
@@ -270,8 +273,11 @@ def check_register() -> list[bool]:
             return 200, '{"access_token":"tok"}'
         return 200, '"bld_' + "z" * 43 + '"'
 
+    def names(*items):          # 가짜 업체 목록 (GET accounts)
+        return lambda url, headers: (200, json.dumps([{"name": item} for item in items], ensure_ascii=False))
+
     build_id = register_build.register("https://x.supabase.co/", "anon", "a@b.c", "pw",
-                                       "업체", "사무실 PC", post=fake)
+                                       "업체", "사무실 PC", post=fake, get=names("업체"))
     out = [check("등록 왕복 — 로그인 뒤 업체·빌드 이름을 보내고 bld_ 를 받는다",
                  build_id.startswith("bld_") and len(calls) == 2
                  and calls[1][1] == {"account_name": "업체", "build_name": "사무실 PC"},
@@ -281,16 +287,52 @@ def check_register() -> list[bool]:
         return (200, '{"access_token":"tok"}') if "token" in url else (403, '{"message":"forbidden"}')
 
     try:
-        register_build.register("https://x", "anon", "a@b.c", "pw", "업체", "PC", post=forbidden)
+        register_build.register("https://x", "anon", "a@b.c", "pw", "업체", "PC", post=forbidden, get=names("업체"))
         out.append(check("관리자가 아니면 막힌다", False))
     except register_build.RegisterError as exc:
         out.append(check("관리자가 아니면 막힌다", "관리자" in str(exc), str(exc)[:50]))
 
     try:
-        register_build.register("https://x", "anon", "", "pw", "업체", "PC", post=fake)
+        register_build.register("https://x", "anon", "", "pw", "업체", "PC", post=fake, get=names("업체"))
         out.append(check("빈 칸이 있으면 부르기 전에 막는다", False))
     except register_build.RegisterError as exc:
         out.append(check("빈 칸이 있으면 부르기 전에 막는다", "비어 있습니다" in str(exc), str(exc)[:50]))
+
+    log.info("▶ 빌드 등록 — 서버에 없는 업체 이름은 확인 뒤에만 (10-07)")
+    asked: list = []
+
+    def attempt(answer, get, confirm=True) -> str:
+        calls.clear()
+        confirm_new = (lambda name, similar: asked.append((name, similar)) or answer) if confirm else None
+        try:
+            register_build.register("https://x", "anon", "a@b.c", "pw", "업체 A", "PC", post=fake, get=get,
+                                    confirm_new=confirm_new)
+            return "등록"
+        except register_build.RegisterError as exc:
+            return str(exc)
+
+    rpc = lambda: [url for url, _ in calls if url.endswith("/rpc/register_build")]   # noqa: E731
+    got = attempt(False, names("업체A", "다른곳"))
+    out.append(check("★ 없는 이름이고 [아니요] 면 서버에 등록하지 않는다 — 비슷한 이름을 같이 보여 준다",
+                     "없는 업체 이름" in got and not rpc() and asked == [("업체 A", ["업체A"])], f"{got[:30]} / {asked}"))
+    got = attempt(True, names("업체A"))
+    out.append(check("[예] 면 그 이름으로 등록한다", got == "등록" and calls[-1][1]["account_name"] == "업체 A"))
+    out.append(check("확인 창이 없으면(콜백 없음) 없는 이름은 거절", "없는 업체 이름" in attempt(True, names(), confirm=False)
+                     and not rpc()))
+    got = attempt(True, lambda url, headers: (401, "{}"))
+    out.append(check("업체 목록을 못 읽으면 등록하지 않는다", "업체 목록" in got and not rpc(), got[:40]))
+    similar = register_build.similar_names("업체A", ["업체 A", "(주)업체a", "전혀 다른 곳", "업체A"])
+    out.append(check("비슷한 이름 — 공백·대소문자·(주) 차이는 잡고, 다른 이름과 자기 자신은 뺀다",
+                     similar == ["업체 A", "(주)업체a"] or similar == ["(주)업체a", "업체 A"], str(similar)))
+    told: list = []
+    keep = build_app.messagebox.askyesno
+    build_app.messagebox.askyesno = lambda title, text, **kw: told.append((text, kw)) or False
+    try:
+        answer = build_app.BuildWindow._ask_new_account(SimpleNamespace(root=None), "업체B", ["업체A"])
+    finally:
+        build_app.messagebox.askyesno = keep
+    out.append(check("확인 창 — 기본 [아니요], 비슷한 이름을 보여 준다",
+                     answer is False and told and told[0][1].get("default") == "no" and "업체A" in told[0][0]))
     return out
 
 

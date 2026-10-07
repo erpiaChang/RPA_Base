@@ -147,7 +147,7 @@
 | `probe_hooks.py` | 훅이 막을 것을 막는지 — 조작 실행·경로·비밀 키·서버 쓰기·실서버 SQL(APPROVED-SQL)·서브에이전트·PowerShell·규칙 경고(`wait_for_timeout`)·GitHub 에 올리기(`git push`·`gh repo create`·`--no-verify`·`npx wrangler@4 deploy`)·서브에이전트의 `.env`·구운 설정 읽기(대소문자 섞어도)·git/gh 다른 꼴(`git.exe`·`-C`·`bash -c`·커밋 검사 끄기·훅 자리 바꾸기·`gh gist/release/api` 쓰기)·서브에이전트의 셸 재귀 검색·비밀 파일 역슬래시 경로 (134) |
 | `probe_leaks.py` | **git 에 실값이 없나** (10-02) — 낱말 목록 없이 `settings.local.json`·`.env`·git 밖 사이트/업체 파일·이 PC 이름에서 값을 뽑고, 메일·전화·사용자 경로·내부 IP 모양도 본다. `파일:줄 — 어디서 온 값` 만 찍는다. 인자 없이 = 추적·새 파일의 지금 내용 / `--staged`(`.githooks/pre-commit`) / `--pre-push`(`pre-push`, 올리는 커밋만) / `--history`(손으로, 모든 ref) / `--selftest` (44). 감싼 비밀번호(dpapi:·baked:)는 풀어서 평문도 찾는다. 설정·.env 를 못 읽으면 커밋·push 를 막는다 |
 | `probe_history.py` | 지난 실행 이력·[실행 기록] 탭·건너뛴 예약(기록 파일·이어지면 한 줄) (19) |
-| `probe_build.py` | 빌드 프로그램·기능 고정 빌드·빌드 등록(가짜 서버)·고정값 잠금 `LOCKED_KEYS`·구울 값 기능별 목록(`modules.baked_required`)·`.bat` 진짜 cmd 실행(한글 줄·종료 코드 — 임시 사본, python·npx 를 못 찾게, 10-07)·판 번호·빌드 직후 자가 점검(가짜 git·가짜 exe) (48) |
+| `probe_build.py` | 빌드 프로그램·기능 고정 빌드·빌드 등록(가짜 서버)·고정값 잠금 `LOCKED_KEYS`·구울 값 기능별 목록(`modules.baked_required`)·`.bat` 진짜 cmd 실행(한글 줄·종료 코드 — 임시 사본, python·npx 를 못 찾게, 10-07)·판 번호·빌드 직후 자가 점검(가짜 git·가짜 exe)·서버에 없는 업체 이름 확인(10-07) (54) |
 | `probe_telemetry.py` | 서버 보고 — 가짜 서버로 이벤트·outbox·401 버림·끊김·심박·비밀 값 없음·서버 확인(바인딩·잠금)·알림(따로·outbox 없이·서버 종류와 같게)·서버 인증서 오류(구분 문구·루트 채우기 1회, 10-07) (67) |
 | `probe_web.py` | 웹 정적 검사 — innerHTML·SRI·CSP·비밀·제어 단추·탭·사용량·실행 중 설정 잠금·매출처리 칸·실행 상세 자동 갱신·설정 칸 기본값 없음·매출처리·택배사·박스 요구·node 구문 (63) — git 의 web/ 에는 주소·키 없이 자리표시만·build_web |
 | `probe_web_shot.py` | 웹 화면 찍기 — Edge 로 가짜 데이터를 넣어 세 폭으로 찍고 콘솔 오류·'null'·남의 업체·가로 스크롤 검사 (15) |
@@ -174,7 +174,7 @@
 | `test_autorun_task.py` | 로그온 자동 시작 등록 (`--show` 만 읽기). 미검증 항목(HANDOFF 2-2) |
 | `bake_settings.py` | 지금 설정을 빌드용으로 굽는다 (파일만 쓴다). 씨앗(`baked.key`)도 같이 — `.env` 에 `BAKED_SEED` 가 없으면 멈춘다. `missing()` — 빈 필수 값 (빌드 프로그램이 서버 등록 **전에** 부른다) |
 | `build_web.py` | 웹 배포 준비 — `.env` 값으로 `web/` 의 자리표시를 채워 `build/web/` 에 만든다 (`deploy_web.bat`, 10-02) |
-| `register_build.py` | **빌드를 서버에 등록해 빌드 ID 를 받는다** (09-28). 빌드 프로그램이 [저장하고 빌드] 때 부른다 — 관리자 계정으로 로그인 → `register_build` RPC → `bld_...` |
+| `register_build.py` | **빌드를 서버에 등록해 빌드 ID 를 받는다** (09-28). 빌드 프로그램이 [저장하고 빌드] 때 부른다 — 관리자 계정으로 로그인 → 업체 목록 확인 → `register_build` RPC → `bld_...`. **서버에 없는 업체 이름이면 빌드 프로그램이 확인 창(기본 [아니요], 비슷한 이름 표시)을 띄우고 [예] 일 때만 새 업체** — 서버 RPC 는 이름이 한 글자라도 다르면 조용히 새 업체를 만든다 (10-07) |
 | `build_run.py` | 실행용 빌드 한 번에 — 굽기·판 번호(`make_version`, 날짜-커밋 해시) → 지난 산출물 삭제 → PyInstaller → 구운 파일 삭제 → **자가 점검**(임시 사본을 `--selfcheck` 로, 실패면 빌드 실패, 10-07). 빌드 프로그램이 쓴다. 콘솔로 바로 돌리면 서버 등록 없이 지금 빌드 ID 로 |
 
 지운 도구(주석·옛 문서에 이름이 남아 있다): 09-18 에 29개 — `docs/archive/HANDOFF_20260928.md` "09-18 — 개발 환경 정리" /

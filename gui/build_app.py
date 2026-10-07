@@ -94,7 +94,7 @@ SECTIONS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
     ("7. 서버 보고", (
         ("server_url", "Supabase 프로젝트 URL (비우면 보고 안 함)", "str"),
         ("server_anon_key", "공개(anon) 키", "str"),
-        ("build_account_name", "업체 이름 (서버에 없으면 만듭니다)", "str"),
+        ("build_account_name", "업체 이름 (서버에 없으면 확인 뒤 만듭니다)", "str"),
         ("build_label", "이 빌드의 이름 (대시보드 PC 표에 보입니다)", "str"),
         ("build_admin_email", "관리자 이메일 (대시보드 로그인 계정)", "str"),
         ("build_admin_password", "관리자 비밀번호", "secret"),
@@ -376,6 +376,13 @@ class BuildWindow:
         threading.Thread(target=self._worker, daemon=True).start()
         self.root.after(200, self._poll)
 
+    def _ask_new_account(self, name: str, similar: list[str]) -> bool:
+        """서버에 없는 업체 이름 — 새 업체로 만들어도 되는지 묻는다 (10-07, 기본 [아니요] — 오타로 업체가 생기지 않게)."""
+        text = f"'{name}' 은(는) 서버에 없는 업체 이름입니다.\n[예] 를 누르면 새 업체로 만들고 이 빌드를 그 아래에 등록합니다."
+        if similar:
+            text += "\n\n비슷한 이름이 이미 있습니다: " + ", ".join(similar) + "\n오타라면 [아니요] 를 누르고 이름을 고치세요."
+        return messagebox.askyesno("새 업체 만들기", text, icon="warning", default="no", parent=self.root)
+
     def _register_build(self, values: dict) -> bool:
         """서버에 이 빌드를 등록하고 빌드 ID 를 설정에 넣는다 (09-28). 계속해도 되면 True.
 
@@ -393,7 +400,8 @@ class BuildWindow:
             build_id = register_build.register(
                 values.get("server_url") or "", values.get("server_anon_key") or "",
                 values.get("build_admin_email") or "", values.get("build_admin_password") or "",
-                values.get("build_account_name") or "", values.get("build_label") or "")
+                values.get("build_account_name") or "", values.get("build_label") or "",
+                confirm_new=self._ask_new_account)
         except register_build.RegisterError as exc:
             self._say(f"서버 등록 실패: {exc}", error=True)
             self._log(f"서버 등록 실패: {exc}\n")
