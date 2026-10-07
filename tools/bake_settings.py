@@ -34,7 +34,7 @@ import sys
 from pathlib import Path
 
 from config.settings import (DEFAULTS, LOCAL_SETTINGS_PATH,  # noqa: E402
-                             PROJECT_ROOT, SECRET_KEYS, SECRET_MAP_KEYS, WORKER_PREFIX)
+                             PROJECT_ROOT, SECRET_KEYS, SECRET_MAP_KEYS, WORKER_PREFIX, read_json_file)
 
 OUT_PATH = PROJECT_ROOT / "build" / "baked" / "settings.baked.json"
 
@@ -75,7 +75,7 @@ def bake(source: Path = LOCAL_SETTINGS_PATH, out: Path = OUT_PATH) -> Path:
     if not source.exists():
         raise SystemExit(f"[중단] 설정 파일이 없다: {source}")
 
-    raw = json.loads(source.read_text(encoding="utf-8"))
+    raw = read_json_file(source)
     values = {k: v for k, v in raw.items()
               if k in DEFAULTS and k not in SKIP_KEYS}
 

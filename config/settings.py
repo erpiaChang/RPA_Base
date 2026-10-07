@@ -18,9 +18,26 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def read_json_file(path: Path) -> object:
+    """설정 JSON 읽기. 메모장이 붙이는 BOM 도 읽는다 (utf-8-sig — BOM 이 없어도 같다, 10-07)."""
+    return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def write_json_atomic(path: Path, text: str) -> None:
+    """임시 파일에 다 쓴 뒤 바꿔 끼운다 — 쓰다 끊겨도 원본은 그대로다 (10-07, 선례 `orchestrator/history.py`).
+    교체가 막히면(백신이 쥠 등) OSError 를 그대로 올린다 — 호출부가 저장 실패로 처리한다."""
+    temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        temp.write_text(text, encoding="utf-8")
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)        # 성공하면 이미 없다. 실패하면 감싼 비밀이 든 임시 파일을 남기지 않는다
 
 
 def _project_root() -> Path:
@@ -181,7 +198,7 @@ def save_local(**values: object) -> Path:
     current: dict = {}
     if LOCAL_SETTINGS_PATH.exists():
         try:
-            current = json.loads(LOCAL_SETTINGS_PATH.read_text(encoding="utf-8"))
+            current = read_json_file(LOCAL_SETTINGS_PATH)
         except json.JSONDecodeError as exc:
             # ★ 손상된 파일을 **조용히 덮어쓰지 않는다.** 다른 값이 전부 사라진다.
             #   백업을 남기고 경고한다 (2026-09-10 감사).
@@ -204,9 +221,7 @@ def save_local(**values: object) -> Path:
     #   그대로 둔다 — 쓰는 쪽(로그인 등)은 감싼 것을 모른다.
     current.update({key: _wrap_value(key, value) for key, value in values.items()})
     LOCAL_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    LOCAL_SETTINGS_PATH.write_text(
-        json.dumps(current, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    write_json_atomic(LOCAL_SETTINGS_PATH, json.dumps(current, indent=2, ensure_ascii=False) + "\n")
     for key, value in values.items():
         setattr(SETTINGS, key, value)
     return LOCAL_SETTINGS_PATH
@@ -244,7 +259,7 @@ def _apply_file(settings: Settings, path: Path, what: str) -> bool:
         return False
 
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = read_json_file(path)
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"{path} 를 읽을 수 없다: {exc}") from exc
 

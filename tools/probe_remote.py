@@ -392,6 +392,46 @@ def check_window() -> list[bool]:
     return out
 
 
+def check_settings_file() -> list[bool]:
+    log.info("▶ 설정 파일 — BOM 읽기·임시 파일 교체 저장 (10-07)")
+    folder = Path(tempfile.mkdtemp())
+    path = folder / "settings.local.json"
+    path.write_text(json.dumps({"delivery_box": "박스A"}, ensure_ascii=False), encoding="utf-8-sig")
+    keep_path = config_settings.LOCAL_SETTINGS_PATH
+    keep_values = {k: getattr(SETTINGS, k, None) for k in ("delivery_company", "delivery_box")}
+    keep_replace = config_settings.os.replace
+    out = []
+    try:
+        config_settings.LOCAL_SETTINGS_PATH = path
+        out.append(check("BOM 붙은 파일을 읽는다", config_settings.read_json_file(path) == {"delivery_box": "박스A"}))
+        config_settings.save_local(delivery_company="택배사A")
+        saved = config_settings.read_json_file(path)
+        out.append(check("BOM 파일에 저장해도 다른 값이 남고 백업을 만들지 않는다",
+                         saved == {"delivery_box": "박스A", "delivery_company": "택배사A"}
+                         and not list(folder.glob("*.bak")), str(saved)))
+        out.append(check("저장 뒤 임시 파일이 없고 BOM 없이 쓴다",
+                         not list(folder.glob("*.tmp")) and not path.read_bytes().startswith(b"\xef\xbb\xbf")))
+
+        def _blocked(src, dst):
+            raise PermissionError("가짜 — 다른 프로그램이 쥐고 있다")
+
+        config_settings.os.replace = _blocked
+        before = path.read_bytes()
+        try:
+            config_settings.save_local(delivery_company="택배사B")
+            raised = False
+        except OSError:
+            raised = True
+        out.append(check("교체가 막히면 오류를 올리고 원본·임시 파일을 남기지 않는다",
+                         raised and path.read_bytes() == before and not list(folder.glob("*.tmp"))))
+    finally:
+        config_settings.os.replace = keep_replace
+        config_settings.LOCAL_SETTINGS_PATH = keep_path
+        for key, value in keep_values.items():
+            setattr(SETTINGS, key, value)
+    return out
+
+
 def check_autostart() -> list[bool]:
     log.info("▶ 자동 켜기 — 등록할 내용만 본다 (등록하지 않는다)")
     # 가짜 경로 — 등록하지 않고 XML 만 본다. `&` 가 든 폴더를 감싸는지 보려고 넣었다
@@ -426,7 +466,8 @@ def main() -> int:
     autorun.STATE_PATH = temp / "autorun_state.json"    # 웹 [일시정지]·[계속하기] 가 남긴다 (10-01)
     try:
         # check_values 는 판을 기록한다 — poll 확인(판 0 에서 시작)보다 뒤에 둔다
-        results = check_keys() + check_poll() + check_values() + check_window() + check_autostart()
+        results = (check_keys() + check_poll() + check_values() + check_window() + check_settings_file()
+                   + check_autostart())
     finally:
         remote.STATE_PATH, autorun.STATE_PATH = keep_state, keep_paused
     log.info("결과: 통과 %d / 실패 %d", sum(results), len(results) - sum(results))

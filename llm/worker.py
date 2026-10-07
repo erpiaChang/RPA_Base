@@ -33,7 +33,8 @@ from urllib import request
 if __package__ in (None, ""):          # 스크립트로 떴다 (자동 켜기) — 프로젝트 폴더를 찾게 한다
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from config.settings import LOCAL_SETTINGS_PATH, LOG_DIR, PROJECT_ROOT, SETTINGS, save_local  # noqa: E402
+from config.settings import (LOCAL_SETTINGS_PATH, LOG_DIR, PROJECT_ROOT, SETTINGS,  # noqa: E402
+                             read_json_file, save_local)
 from orchestrator.telemetry import _http_post, _server  # noqa: E402
 from utils import autostart, instance, secret  # noqa: E402
 from utils.logger import get_logger, setup_logging  # noqa: E402
@@ -329,7 +330,7 @@ def worker_key() -> str:
     """settings.local.json 에서 직접 읽는다 (RPA 설정 항목이 아니다)."""
     if not LOCAL_SETTINGS_PATH.exists():
         return ""
-    raw = json.loads(LOCAL_SETTINGS_PATH.read_text(encoding="utf-8"))
+    raw = read_json_file(LOCAL_SETTINGS_PATH)
     value = secret.unwrap(raw.get(KEY_NAME) or "")
     return value if isinstance(value, str) else ""
 
