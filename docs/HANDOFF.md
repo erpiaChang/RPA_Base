@@ -44,10 +44,11 @@ RPA 흐름 3종(수집 / ERPia / 통합)이 구현·검증됐고, 배포는 실�
 
 | 무엇 | 필요한 것 |
 | --- | --- |
-| **로그인에 비밀번호 변경 요구 창이 뜬다** (설정 계정, 10-07 실측 — `CONTROLS.md` 로그인 절 `Frm_ChangePassword`) | **고침 (10-07 사용자 확정 — 늘 [다음에 변경하기])**. 강제 변경(단추 없음)이면 멈추고 사람 말로 알린다. 가짜 창(`probe_failure`)으로 확인 |
-| 6·7번 실제 시험 — `tools/test_find_jump` (Ctrl+F 찾기 창·점프 시간·조회 로딩 창) | 위 창이 풀린 뒤 `--launch --yes` (APPROVED-RUN, 화면을 몇 분 쓴다) |
-| 업체 단위 중지 — `server/schema.sql` (`suspended_at`·`bind_device`·`can_control`·`suspend_account`/`resume_account`) + **웹 관리자 [PC] 탭 단추** (10-07 사용자 요청) · 풀면 PC 가 10분 안에 다시 확인 | **실서버 미적용.** SQL 을 보이고 결정 → `-- APPROVED-SQL` → 적용 뒤 md5(prosrc) 대조 |
-| **설정은 PC 에만** (10-07 사용자 확정) — 서버 `device_settings` 표를 지우고, 웹은 열 때 PC 에 묻는다(`request_settings`·`take_settings`), 바꾼 값은 `settings` 명령으로 건네고 지운다 | **실서버 미적용** (위와 한 번에). 순서: SQL → 웹 배포 → 빌드 |
+| **로그인에 비밀번호 변경 요구 창이 뜬다** (설정 계정, 10-07 실측 — `CONTROLS.md` 로그인 절 `Frm_ChangePassword`) | **고침·실기 확인 (10-07 사용자 확정 — 늘 [다음에 변경하기])**. `test_find_jump --launch` 로그인에서 진짜 창의 [다음에 변경하기] Invoke → 로그인 성공. 강제 변경(단추 없음)이면 멈추고 사람 말로 알린다 (가짜 창 `probe_failure`) |
+| 6·7번 실제 시험 — `tools/test_find_jump` | **돌렸다 (10-07)** — 결과는 `CONTROLS.md` "찾기(Ctrl+F) 창·조회 로딩 창". Ctrl+F 는 따로 뜨는 '찾기' 창(Win32 로만 잡힘), 점프 효과는 3행이라 판정 못 함 → 쓰지 않는다. 도구는 기능이 끝났으니 지울 대상 (승인 뒤) |
+| ★ **[조회] 직후 상단 그리드 '0행으로 안정' 판정** (10-07 위 시험에서 드러남) | `logistics_wait._wait_rows` 가 로딩 덮개가 사라진 0.26초 뒤 '보이는 0행' 으로 끝났는데 1초 안에 행이 생겼다. `hold_shortage_items` 는 그 뒤 상단을 훑는다 — 행이 더 늦게 뜨면 **훑은 행 0개로 보류 없이 끝날 수 있다** (조용한 누락). 그동안 실기에서는 그 사이 일(헤더 읽기·맨 위로)이 시간을 벌어 안 드러났다고 본다. **고치지 않음 — 사용자 결정 대기** |
+| 업체 단위 중지 — `server/schema.sql` (`suspended_at`·`bind_device`·`can_control`·`suspend_account`/`resume_account`) + **웹 관리자 [PC] 탭 단추** (10-07 사용자 요청) · 풀면 PC 가 10분 안에 다시 확인 | **실서버 미적용.** 10-07 사용자 승인("1,2, 모두 승인") 뒤 `apply_migration` 호출이 **승인 창에서 거절됐다** — 서버는 그대로. 다시 승인 받고 적용 → md5(prosrc) 대조 |
+| **설정은 PC 에만** (10-07 사용자 확정) — 서버 `device_settings` 표를 지우고, 웹은 열 때 PC 에 묻는다(`request_settings`·`take_settings`), 바꾼 값은 `settings` 명령으로 건네고 지운다. **`devices` 의 상태값(예약 켬/끔·일시정지·다음 예약·판 번호)은 남긴다** (사용자 확정 10-07) | **실서버 미적용** (위와 한 번에). 순서: SQL → 웹 배포(SQL 전에 올리면 웹이 설정을 못 받는다) |
 | RLS 거부 시험 — `server/tests/rls_check.sql` | 실서버 1회 실행 (끝에서 전부 되돌림, APPROVED-SQL). 업체 중지 적용 뒤면 2단계도 돈다. 설정 주고받기 한 바퀴도 본다 |
 | ~~웹 [비밀번호 변경] (`#/account`)~~ | **지웠다** (10-07 사용자 확정 — 비밀번호는 프로그램에서만). 웹 로그인 비밀번호는 관리자가 바꾼다 |
 | 빌드로만 볼 수 있는 것 | 다음 빌드에서: 빌드 직후 자가 점검(`--selfcheck`)이 실제로 도는지 · 판 번호가 웹 PC 표에 · 켜는 중 실패 때 알림 창이 PyInstaller 오류 창과 겹치지 않는지 · 관리자/일반 권한 두 벌 막기 |

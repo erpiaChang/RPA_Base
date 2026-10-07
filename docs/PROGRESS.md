@@ -165,7 +165,7 @@
 | `probe_speed.py` / `probe_resources.py` / `probe_search_trace.py` | 속도 배율 / 자원 / 탐색 집계 (`test_flow --trace`) |
 | **조작 (`APPROVED-RUN` 필요)** | |
 | `test_flow.py` | 전체 흐름 콘솔 실행. `--from` `--yes` `--dry-run` `--trace` |
-| `test_find_jump.py` | **찾기(Ctrl+F) 점프·조회 로딩 창 측정** (10-07, 데이터 안 바꿈) — 물류대기 [재고검토] 에서 Ctrl+F 가 따로 뜨는 '찾기' 창(`txt_Key`)인지(Win32·UIA 둘로), 점프 vs 끝까지 훑기 시간, [조회]·상단 행 선택 때 그리드를 덮는 자식 창과 우리 완료 판정 비교. `--launch` 는 흐름처럼 켜고 로그인. 키는 맨 앞 창이 ERPia 일 때만. **아직 못 돌림** — 로그인에서 비밀번호 변경 요구 창(HANDOFF) |
+| `test_find_jump.py` | **찾기(Ctrl+F) 점프·조회 로딩 창 측정** (10-07, 데이터 안 바꿈) — 물류대기 [재고검토] 에서 Ctrl+F 가 따로 뜨는 '찾기' 창(`txt_Key`)인지(Win32·UIA 둘로), 점프 vs 끝까지 훑기 시간, [조회]·상단 행 선택 때 그리드를 덮는 자식 창과 우리 완료 판정 비교. `--launch` 는 흐름처럼 켜고 로그인. 키는 맨 앞 창이 ERPia 일 때만. **10-07 돌림** — 결과는 `CONTROLS.md` "찾기(Ctrl+F) 창·조회 로딩 창". 지울 대상(승인 뒤) |
 | `test_open_screen.py` | **물류 화면 열기만** (09-29, 저장 없음) — `--screen wait` [일반]→[조회] / `stock` 재고검토→[조회] / `logistics` [등록(I)]. `--count` 는 흐름과 같은 함수로 전표 수를 센다(스크롤만) |
 | `test_collect.py` | 수집 RPA. `--check` / `--sms-only` / `--dry-run` |
 | `test_full.py` | 통합 흐름 콘솔 실행. `--modules orders,logistics` 로 기능 선택. 끝나면 창과 같은 리포트(`logs/report_*.html`) |
