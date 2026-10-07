@@ -35,7 +35,7 @@ for _stream in (sys.stdout, sys.stderr):
         continue
 
 from collect import pw_driver  # noqa: E402
-from utils import autostart, crashlog, instance, process  # noqa: E402
+from utils import autostart, crashlog, instance, process, selfcheck  # noqa: E402
 from utils.logger import get_logger, setup_logging  # noqa: E402
 
 log = get_logger(__name__)
@@ -154,7 +154,9 @@ def check_entry() -> list[bool]:
             ("★ 작업이 띄운 것(--task)은 다시 넘기지 않는다", True, ["--background", "--task"], [True], None,
              ["install", "acquire", "run"]),
             ("이미 떠 있고 사람이 눌렀으면 알린다", True, [], [False], None, ["install", "acquire", "tell"]),
-            ("이미 떠 있고 자동 켜기면 조용히 끝난다", True, ["--background"], [False], None, ["install", "acquire"])):
+            ("이미 떠 있고 자동 켜기면 조용히 끝난다", True, ["--background"], [False], None, ["install", "acquire"]),
+            ("★ 빌드 직후 점검(--selfcheck)은 훅·한 벌 확인·창 없이 점검만 (10-07)", True,
+             ["--selfcheck", "x.json"], [True], None, ["selfcheck"])):
         calls = _run_entry(frozen, args, list(acquire), handed)
         out.append(check(name, calls == want, f"{calls}"))
     return out
@@ -163,10 +165,11 @@ def check_entry() -> list[bool]:
 def _run_entry(frozen: bool, args: list[str], acquire: list[bool], handed: bool | None) -> list[str]:
     calls: list[str] = []
     keep = (instance.acquire, instance.release, instance.tell_already_running,
-            autostart.hand_over, sys.argv, sys.modules.get("gui.run_app"), crashlog.install)
+            autostart.hand_over, sys.argv, sys.modules.get("gui.run_app"), crashlog.install, selfcheck.run)
     fake_gui = types.ModuleType("gui.run_app")
     fake_gui.run = lambda: calls.append("run") or 0
     crashlog.install = lambda *a: calls.append("install")     # 진짜는 전역 훅을 바꾼다
+    selfcheck.run = lambda argv: calls.append("selfcheck") or 0
     instance.acquire = lambda *a: calls.append("acquire") or acquire.pop(0)
     instance.release = lambda: calls.append("release")
     instance.tell_already_running = lambda: calls.append("tell")
@@ -181,7 +184,7 @@ def _run_entry(frozen: bool, args: list[str], acquire: list[bool], handed: bool 
         log.debug("main_run 끝 (%s)", done.code)
     finally:
         (instance.acquire, instance.release, instance.tell_already_running,
-         autostart.hand_over, sys.argv, gui, crashlog.install) = keep
+         autostart.hand_over, sys.argv, gui, crashlog.install, selfcheck.run) = keep
         if gui is None:
             sys.modules.pop("gui.run_app", None)
         else:
@@ -275,6 +278,29 @@ def check_crashlog() -> list[bool]:
     return out
 
 
+def check_selfcheck() -> list[bool]:
+    """빌드 직후 자가 점검 본체를 개발 폴더에서 돌린다 (10-07) — 한 벌 확인·서버 확인·로그 열기를 부르지 않는가."""
+    log.info("▶ 자가 점검 본체 (개발 폴더 — 모듈 전부 불러오기·Tcl·UIA)")
+    from orchestrator import telemetry
+    from utils import logger
+
+    touched: list[str] = []
+    keep = (instance.acquire, telemetry.verify, logger.setup_logging)
+    instance.acquire = lambda *a: touched.append("acquire")
+    telemetry.verify = lambda *a, **k: touched.append("verify")
+    logger.setup_logging = lambda *a, **k: touched.append("setup_logging")
+    try:
+        result = selfcheck.collect()
+    finally:
+        instance.acquire, telemetry.verify, logger.setup_logging = keep
+    steps = result["steps"]
+    return [check("모듈 전부 불러오기·Tcl·UIA 가 통과한다",
+                  all(steps[name]["ok"] for name in ("modules", "tcl", "uia")),
+                  str({k: v["detail"][:60] for k, v in steps.items()})),
+            check("★ 점검은 한 벌 확인·서버 확인·로그 열기를 부르지 않는다", not touched, str(touched)),
+            check("개발 전용(빌드 프로그램)은 불러오지 않는다", "gui.build_app" in selfcheck.SKIP)]
+
+
 def check_clock() -> list[bool]:
     log.info("▶ 켜는 데 걸린 시간 — 프로세스 생성 시각")
     started = process.created_epoch(os.getpid())
@@ -358,7 +384,7 @@ def _sha(path: Path) -> bytes:
 def main() -> int:
     setup_logging()
     results = (check_driver() + check_hand_over() + check_entry() + check_instance() + check_crashlog()
-               + check_clock())
+               + check_selfcheck() + check_clock())
     if "--exe" in sys.argv:
         global EXE
         after = sys.argv[sys.argv.index("--exe") + 1:]

@@ -312,6 +312,69 @@ def check_baked_required() -> list[bool]:
     ]
 
 
+def check_version_and_selfcheck() -> list[bool]:
+    """판 번호·빌드 직후 자가 점검 (10-07) — git·exe 는 가짜로 (빌드하지 않는다)."""
+    import json
+    import shutil
+    import subprocess
+    from datetime import date
+    from types import SimpleNamespace
+
+    log.info("▶ 판 번호 · 빌드 직후 자가 점검 (가짜 git·가짜 exe)")
+    day = date(2026, 10, 7)
+
+    def fake_git(dirty: str):
+        def run(cmd, **kwargs):
+            return SimpleNamespace(stdout="abc1234\n" if "rev-parse" in cmd else dirty)
+        return run
+
+    def no_git(cmd, **kwargs):
+        raise OSError("git 없음")
+
+    out = [check("판 번호 = 날짜-커밋 해시", build_run.make_version(fake_git(""), day) == "2026.10.07-abc1234"),
+           check("커밋 안 된 변경이 있으면 끝에 +", build_run.make_version(fake_git(" M x.py"), day) == "2026.10.07-abc1234+"),
+           check("git 이 없으면 날짜만", build_run.make_version(no_git, day) == "2026.10.07"),
+           check("개발 폴더의 판은 dev", settings_mod.APP_VERSION == "dev", settings_mod.APP_VERSION)]
+
+    exe = settings_mod.PROJECT_ROOT / "build" / "probe_fake_exe" / "RPA_1.exe"
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    exe.write_bytes(b"MZ fake")
+    seen: list = []
+
+    def fake_exe(result):
+        def run(cmd, **kwargs):
+            seen.append(cmd)
+            if isinstance(result, Exception):
+                raise result
+            if result is not None:
+                Path(cmd[2]).write_text(json.dumps(result), encoding="utf-8")
+            return SimpleNamespace(returncode=0 if result and result.get("ok") else 1)
+        return run
+
+    def outcome(result) -> str:
+        try:
+            build_run.selfcheck(exe, lambda line: None, run=fake_exe(result))
+            return "통과"
+        except build_run.BuildError as exc:
+            return str(exc)
+
+    try:
+        good = {"ok": True, "version": "v", "steps": {"modules": {"ok": True, "detail": "10개"}}}
+        bad = {"ok": False, "steps": {"modules": {"ok": False, "detail": "ImportError"}}}
+        passed = outcome(good)
+        cmd = seen[-1] if seen else []
+        out.append(check("★ 임시 사본을 --selfcheck 로 켠다 (dist 의 exe 를 직접 켜지 않는다)", passed == "통과"
+                         and cmd[1:2] == ["--selfcheck"] and Path(cmd[0]).parent == build_run.SELFCHECK_DIR, str(cmd)))
+        out.append(check("점검이 끝나면 임시 사본을 지운다", not build_run.SELFCHECK_DIR.exists()))
+        out.append(check("점검 실패면 빌드 실패 — 쓰지 말라고 알린다", "쓰지 말 것" in outcome(bad)))
+        out.append(check("결과 없이 끝나면(켜자마자 죽음) 빌드 실패", "결과가 없다" in outcome(None)))
+        out.append(check("시간을 넘기면 빌드 실패",
+                         "끝나지 않았다" in outcome(subprocess.TimeoutExpired(["x"], 1))))
+    finally:
+        shutil.rmtree(exe.parent, ignore_errors=True)
+    return out
+
+
 def check_bats() -> list[bool]:
     """.bat 을 진짜 cmd 로 돌려 본다 (10-07). 다른 RPA 는 UTF-8 + chcp 65001 에서 cmd 가 한글 줄 뒤 줄 위치를 잘못 세어
     줄 조각을 명령으로 실행했다. 이 PC 에서는 재현되지 않아 파일은 그대로 두고, 고친 뒤 깨지면 여기서 잡는다.
@@ -349,7 +412,8 @@ def main() -> int:
     # 실행 창을 만들면 그것만으로 서버 확인이 나가고, 아직 안 묶인 빌드가 이 PC 에 묶인다 (09-28)
     with probe_guard.offline():
         results = [*check_fields(), *check_parse(), *check_window(), *check_locked_run_window(),
-                   *check_register(), *check_locked_keys(), *check_baked_required(), *check_bats()]
+                   *check_register(), *check_locked_keys(), *check_baked_required(),
+                   *check_version_and_selfcheck(), *check_bats()]
     log.info("결과: 통과 %d / 실패 %d", sum(results), len(results) - sum(results))
     return 0 if all(results) else 1
 

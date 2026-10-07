@@ -15,6 +15,11 @@ build_tool.bat  →  gui/build_app.py (창)  →  tools/build_run.py  →  dist\
 빌드는 이전 `build\build_run` / `dist\run` 을 지우고 다시 만든다 (`tools/build_run.py`).
 남겨두면 옛 코드가 섞인 exe 가 나온다. **앞 exe 를 남기려면 빌드 전에 다른 폴더로 옮긴다.**
 
+**판 번호·자가 점검 (10-07)**
+- 판 번호는 빌드가 정한다: `날짜-커밋 해시` (커밋 안 된 변경이 있으면 끝에 `+`). 번들 `config/version.txt` → `APP_VERSION` → 서버 보고·웹 PC 표. 개발 폴더에서 돌면 `dev`. HANDOFF 의 exe 줄에 이 값을 적는다.
+- 빌드 끝에 **exe 의 임시 사본을 `--selfcheck` 로 켜 본다** (`build\selfcheck\`, 끝나면 지움) — 우리 모듈 전부 불러오기·구운 필수 값·씨앗·Tcl·UIA 클라이언트. 실패하면 빌드 실패("이 exe 를 쓰지 말 것"). 창·한 벌 확인·서버 확인 앞에서 끝나므로 빌드를 이 PC 에 묶지 않는다 (`utils/selfcheck.py`, `main_run.py` 맨 앞).
+- 빌드 프로그램은 서버 등록이 빌드보다 먼저라, 점검이 실패해도 빌드 ID 는 이미 생겨 있다 (쓰지 않는 ID 로 남는다).
+
 > **빌드는 요청받았을 때만 한다** (사용자 확정 2026-09-07).
 > 코드를 고칠 때마다 자동으로 다시 빌드하지 않는다.
 > 따라서 `dist/` 의 exe 는 **마지막으로 빌드한 시점의 코드**이며,

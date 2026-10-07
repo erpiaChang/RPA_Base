@@ -112,6 +112,7 @@
 | `llm/worker.py` | **사용법 질문 워커** (09-28, LLM 전용 PC 에서만. RPA 빌드에 안 들어간다) — `llm_take`(서버가 2초 기다림)로 질문을 가져가 LM Studio(`qwen/qwen3-8b`, 이름 `rpa-help`, 문맥 8192)로 스트리밍 답을 만들며 `llm_write` 로 흘려 쓴다(쓰기는 따로 도는 스레드). 설명서만 보고 답한다. `--init`(워커 키, 해시만 찍음) / `--install`(자동 켜기) / `--bench`(속도·답). 로그 `logs/llm/` |
 | `llm/guide.md` | 워커가 답할 때 넣는 **사용자용 설명서** — 화면 이름 기준, 내부 값 금지. 고치면 다음 질문부터 바뀐다 (9000자 이하, 늘리면 `--bench` 로 문맥 토큰을 본다) |
 | `utils/instance.py` | **한 벌만 뜬다** (09-28) — exe 경로로 이름 붙인 뮤텍스. 자동 켜기가 5분마다 띄워도 겹치지 않는다 |
+| `utils/selfcheck.py` | **빌드 직후 자가 점검** (10-07) — `RPA_1.exe --selfcheck <결과 파일>`. 우리 패키지 모듈 전부 불러오기(`pkgutil`)·구운 필수 값·씨앗·Tcl·UIA 클라이언트. `main_run.py` 맨 앞에서 갈라져 한 벌 확인·서버 확인·창·로그를 거치지 않는다. 결과는 JSON 파일(값은 담지 않는다) |
 | `utils/crashlog.py` | **처리 안 된 예외를 logs 에 남긴다** (10-07) — exe 는 stderr 가 없어 Tk 콜백·스레드·켜는 중 예외가 사라졌다. `logs/crash_YYYYMMDD.log` + 처음 보는 오류만 알림(프로세스당 3번). 실행 중·무인이면 상태줄만, 창이 뜨기 전 실패는 사람이 켰을 때만 알림 창. 표준 라이브러리만 (설정이 깨져도 남긴다) |
 | `utils/autostart.py` | **자동 켜기** (09-28) — 로그온 때(`HKCU\...\Run`) + 5분마다 "안 떠 있으면 켜기"(작업 스케줄러 XML — 72시간 종료·배터리 조건 끔). `--background` 로 최소화 시작. 인자·작업 폴더·이름을 넘기면 LLM 워커도 같은 방식으로 건다 (`RPA_LLM_worker`). **09-29**: RPA 작업은 `--background --task`·우선순위 보통(5), `hand_over` — 로그온(Run)으로 켜진 것은 작업에 넘긴다 |
 | `gui/erpia_app.py` | 실행용 창의 **부모** — 실행·예외 처리·무인 경로. 혼자 띄우지 않는다 (10-06) |
@@ -145,13 +146,13 @@
 | `probe_hooks.py` | 훅이 막을 것을 막는지 — 조작 실행·경로·비밀 키·서버 쓰기·실서버 SQL(APPROVED-SQL)·서브에이전트·PowerShell·규칙 경고(`wait_for_timeout`)·GitHub 에 올리기(`git push`·`gh repo create`·`--no-verify`·`npx wrangler@4 deploy`)·서브에이전트의 `.env`·구운 설정 읽기(대소문자 섞어도)·git/gh 다른 꼴(`git.exe`·`-C`·`bash -c`·커밋 검사 끄기·훅 자리 바꾸기·`gh gist/release/api` 쓰기)·서브에이전트의 셸 재귀 검색·비밀 파일 역슬래시 경로 (134) |
 | `probe_leaks.py` | **git 에 실값이 없나** (10-02) — 낱말 목록 없이 `settings.local.json`·`.env`·git 밖 사이트/업체 파일·이 PC 이름에서 값을 뽑고, 메일·전화·사용자 경로·내부 IP 모양도 본다. `파일:줄 — 어디서 온 값` 만 찍는다. 인자 없이 = 추적·새 파일의 지금 내용 / `--staged`(`.githooks/pre-commit`) / `--pre-push`(`pre-push`, 올리는 커밋만) / `--history`(손으로, 모든 ref) / `--selftest` (44). 감싼 비밀번호(dpapi:·baked:)는 풀어서 평문도 찾는다. 설정·.env 를 못 읽으면 커밋·push 를 막는다 |
 | `probe_history.py` | 지난 실행 이력·[실행 기록] 탭·건너뛴 예약(기록 파일·이어지면 한 줄) (19) |
-| `probe_build.py` | 빌드 프로그램·기능 고정 빌드·빌드 등록(가짜 서버)·고정값 잠금 `LOCKED_KEYS`·구울 값 기능별 목록(`modules.baked_required`)·`.bat` 진짜 cmd 실행(한글 줄·종료 코드 — 임시 사본, python·npx 를 못 찾게, 10-07) (39) |
+| `probe_build.py` | 빌드 프로그램·기능 고정 빌드·빌드 등록(가짜 서버)·고정값 잠금 `LOCKED_KEYS`·구울 값 기능별 목록(`modules.baked_required`)·`.bat` 진짜 cmd 실행(한글 줄·종료 코드 — 임시 사본, python·npx 를 못 찾게, 10-07)·판 번호·빌드 직후 자가 점검(가짜 git·가짜 exe) (48) |
 | `probe_telemetry.py` | 서버 보고 — 가짜 서버로 이벤트·outbox·401 버림·끊김·심박·비밀 값 없음·서버 확인(바인딩·잠금)·알림(따로·outbox 없이·서버 종류와 같게)·서버 인증서 오류(구분 문구·루트 채우기 1회, 10-07) (67) |
 | `probe_web.py` | 웹 정적 검사 — innerHTML·SRI·CSP·비밀·제어 단추·탭·사용량·실행 중 설정 잠금·매출처리 칸·실행 상세 자동 갱신·설정 칸 기본값 없음·매출처리·택배사·박스 요구·node 구문 (63) — git 의 web/ 에는 주소·키 없이 자리표시만·build_web |
 | `probe_web_shot.py` | 웹 화면 찍기 — Edge 로 가짜 데이터를 넣어 세 폭으로 찍고 콘솔 오류·'null'·남의 업체·가로 스크롤 검사 (15) |
 | `probe_remote.py` | 원격 설정·명령·자동 켜기 — poll 주고받기·실행 중 미루기·명령 넷·설정 바로 저장·서버 판에 빠진 키 채우기·웹 매출처리 반영·설정 파일(BOM 읽기·임시 파일 교체 저장, 10-07) (56) |
 | `probe_llm.py` | 사용법 질문 워커 — 가짜 LM Studio·가짜 서버, 설명서에 내부 값 없음, 끊김·재시도·워커 키·빌드에서 뺌 (42) |
-| `probe_startup.py` | 켜기 비용 — node.exe 리소스 꺼내기·작업 스케줄러 넘기기·`main_run.py` 순서·한 벌 판정(권한이 다른 벌)·처리 안 된 예외 기록(10-07) (35). `--exe [--browser]` 빌드본 |
+| `probe_startup.py` | 켜기 비용 — node.exe 리소스 꺼내기·작업 스케줄러 넘기기·`main_run.py` 순서·한 벌 판정(권한이 다른 벌)·처리 안 된 예외 기록·`--selfcheck` 경로와 점검 본체(10-07) (39). `--exe [--browser]` 빌드본 |
 | `probe_guard.py` | **확인 도구가 실서버에 닿지 않게** — `offline()` 이 서버 설정 키를 비운다 (실행 창은 뜨기만 해도 서버 확인을 보내 그 PC 에 묶인다, 09-23 사고) |
 | `probe_gui.py` | 우리 창이 만들어지는지·창 크기·단계 표 |
 | `probe_overlay.py` / `probe_shot.py` | 오버레이 확인 (81) / **PNG 로 찍기** (`--stages` 실행용 창 모양, 끝난 결과 띠 포함) |
@@ -173,7 +174,7 @@
 | `bake_settings.py` | 지금 설정을 빌드용으로 굽는다 (파일만 쓴다). 씨앗(`baked.key`)도 같이 — `.env` 에 `BAKED_SEED` 가 없으면 멈춘다. `missing()` — 빈 필수 값 (빌드 프로그램이 서버 등록 **전에** 부른다) |
 | `build_web.py` | 웹 배포 준비 — `.env` 값으로 `web/` 의 자리표시를 채워 `build/web/` 에 만든다 (`deploy_web.bat`, 10-02) |
 | `register_build.py` | **빌드를 서버에 등록해 빌드 ID 를 받는다** (09-28). 빌드 프로그램이 [저장하고 빌드] 때 부른다 — 관리자 계정으로 로그인 → `register_build` RPC → `bld_...` |
-| `build_run.py` | 실행용 빌드 한 번에 — 굽기 → 지난 산출물 삭제 → PyInstaller → 구운 파일 삭제. 빌드 프로그램이 쓴다. 콘솔로 바로 돌리면 서버 등록 없이 지금 빌드 ID 로 |
+| `build_run.py` | 실행용 빌드 한 번에 — 굽기·판 번호(`make_version`, 날짜-커밋 해시) → 지난 산출물 삭제 → PyInstaller → 구운 파일 삭제 → **자가 점검**(임시 사본을 `--selfcheck` 로, 실패면 빌드 실패, 10-07). 빌드 프로그램이 쓴다. 콘솔로 바로 돌리면 서버 등록 없이 지금 빌드 ID 로 |
 
 지운 도구(주석·옛 문서에 이름이 남아 있다): 09-18 에 29개 — `docs/archive/HANDOFF_20260928.md` "09-18 — 개발 환경 정리" /
 09-29 에 `test_sales_menu.py` (선택주문 매출처리 결과 창 문구를 실기로 확인해 끝남) /

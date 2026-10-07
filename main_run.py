@@ -22,8 +22,12 @@ import sys
 from utils import crashlog, instance
 
 if __name__ == "__main__":
-    crashlog.install()                      # 켜는 중 import 실패(설정 깨짐 등)·창의 예외도 logs 에 남긴다 (10-07)
     args = sys.argv[1:]
+    if "--selfcheck" in args:               # 빌드 직후 점검 (10-07, `utils/selfcheck.py`) — 아무것도 켜지 않는다.
+        from utils import selfcheck         # 훅보다도 먼저 — 점검이 터져도 알림 창이 빌드를 막지 않게
+
+        sys.exit(selfcheck.run(args[args.index("--selfcheck") + 1:][:1]))
+    crashlog.install()                      # 켜는 중 import 실패(설정 깨짐 등)·창의 예외도 logs 에 남긴다 (10-07)
     if not instance.acquire():
         if "--background" not in args:
             instance.tell_already_running()

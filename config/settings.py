@@ -116,8 +116,23 @@ WORKER_PREFIX = "llm_"
 LOCKED_KEYS = ("login_company_code", "login_user_id", "mail_url", "mail_user_id",
                "run_modules_locked", "server_url", "server_anon_key", "server_build_id")
 
-# 프로그램 버전. 서버 보고(`orchestrator/telemetry.py`)가 함께 보낸다. 빌드할 때 올린다.
-APP_VERSION = "2026.09.22"
+# 프로그램 판. 서버 보고(`orchestrator/telemetry.py`)가 보내고 웹 PC 표에 보인다.
+# 빌드가 '날짜-커밋 해시'(커밋 안 된 변경이 있으면 끝에 +)를 번들 `config/version.txt` 로 넣는다 (10-07, `tools/build_run.py`).
+# 개발 폴더에서 돌면 "dev". 설정 키로 굽지 않는다 — 모르는 키 경고가 난다.
+VERSION_FILE = "version.txt"
+
+
+def _app_version() -> str:
+    bundle = getattr(sys, "_MEIPASS", None)
+    if not bundle:
+        return "dev"
+    try:
+        return (Path(bundle) / "config" / VERSION_FILE).read_text(encoding="utf-8").strip() or "?"
+    except OSError:
+        return "?"
+
+
+APP_VERSION = _app_version()
 # 값이 딕셔너리이고 그 **안쪽 값**이 비밀인 항목.
 SECRET_MAP_KEYS = ("excel_passwords",)
 

@@ -41,6 +41,7 @@ HIDDEN += ["config.fields_collect", "config.fields_erpia"]
 # 사용자는 화면에 없는 항목 때문에 실행이 막히고, 스스로 고칠 수도 없다.
 BAKED_SOURCE = os.path.join("build", "baked", "settings.baked.json")
 SEED_SOURCE = os.path.join("build", "baked", "baked.key")      # utils/secret.SEED_FILE — 원본은 .env (10-02)
+VERSION_SOURCE = os.path.join("build", "baked", "version.txt")  # config/settings.VERSION_FILE
 for _need in (BAKED_SOURCE, SEED_SOURCE):
     if not os.path.isfile(_need):
         raise SystemExit(
@@ -74,7 +75,9 @@ a = Analysis(
     pathex=[],
     binaries=[],
     # ★ 이 빌드만 설정을 번들에 넣는다. 다른 빌드는 exe 옆에서 읽고 쓴다.
-    datas=[(BAKED_SOURCE, "config"), (SEED_SOURCE, "config")],
+    datas=[(BAKED_SOURCE, "config"), (SEED_SOURCE, "config")]
+          # 판 번호 (10-07, `tools/build_run.py` 가 만든다). 직접 PyInstaller 를 돌려 없으면 판이 '?' 로 보인다
+          + ([(VERSION_SOURCE, "config")] if os.path.isfile(VERSION_SOURCE) else []),
     hiddenimports=HIDDEN,
     hookspath=[],
     hooksconfig={},
