@@ -38,6 +38,21 @@ RPA 흐름 3종(수집 / ERPia / 통합)이 구현·검증됐고, 배포는 실�
 
 ## 2. 열린 항목
 
+### 2-0. 10-07 — 다른 팀 RPA 의 장점 적용: 승인·결정 대기
+
+코드·확인 도구까지 끝 (커밋 `f4a88d6`~`67c3251`, 확인 도구 27종 통과). 남은 것:
+
+| 무엇 | 필요한 것 |
+| --- | --- |
+| **로그인에 비밀번호 변경 요구 창이 뜬다** (설정 계정, 10-07 실측 — `CONTROLS.md` 로그인 절 `Frm_ChangePassword`) | **지금 로그인 코드는 이 창을 몰라 30초 뒤 실패 — 예약 실행도 멈춘다.** 사용자 결정: 사람이 비밀번호를 바꾸고 설정을 고칠지 / RPA 가 [다음에 변경하기](`btn_NextTime`)를 누르게 할지 |
+| 6·7번 실제 시험 — `tools/test_find_jump` (Ctrl+F 찾기 창·점프 시간·조회 로딩 창) | 위 창이 풀린 뒤 `--launch --yes` (APPROVED-RUN, 화면을 몇 분 쓴다) |
+| 업체 단위 중지 — `server/schema.sql` (`suspended_at`·`bind_device`·`can_control`·`suspend_account`/`resume_account`) | **실서버 미적용.** SQL 을 보이고 결정 → `-- APPROVED-SQL` → 적용 뒤 md5(prosrc) 대조 |
+| RLS 거부 시험 — `server/tests/rls_check.sql` | 실서버 1회 실행 (끝에서 전부 되돌림, APPROVED-SQL). 업체 중지 적용 뒤면 2단계도 돈다 |
+| 웹 [비밀번호 변경] (`#/account`) | 배포 (`deploy_web.bat`, APPROVED-RUN). 실서버 `updateUser`·`signOut({scope:"others"})` 는 미검증 |
+| 빌드로만 볼 수 있는 것 | 다음 빌드에서: 빌드 직후 자가 점검(`--selfcheck`)이 실제로 도는지 · 판 번호가 웹 PC 표에 · 켜는 중 실패 때 알림 창이 PyInstaller 오류 창과 겹치지 않는지 · 관리자/일반 권한 두 벌 막기 |
+| 미검증 (실제 상황이 와야) | 갓 설치 Windows 의 인증서 채우기 · 자동수집 대기 중 ERPia 알림 · 휴대폰 연결 앱의 다른 판 탭 id · 실사이트의 사이트 화면 도우미 |
+| 하지 않음 / 결정 필요 | Windows 샌드박스 시험(이 PC 에 기능이 꺼져 있다 — 켜려면 관리자·재부팅) · 선불 토큰(충전 주체·오프라인 정책) · 관리 도구(범위) · `.bat` 은 이 PC 에서 문제 재현이 안 돼 그대로 두고 실행 검사만 |
+
 ### 2-1. 다음에 할 실기
 
 | 무엇 | 왜 / 무엇이 있어야 |
