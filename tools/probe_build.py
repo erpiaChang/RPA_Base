@@ -312,6 +312,36 @@ def check_baked_required() -> list[bool]:
     ]
 
 
+def check_bats() -> list[bool]:
+    """.bat 을 진짜 cmd 로 돌려 본다 (10-07). 다른 RPA 는 UTF-8 + chcp 65001 에서 cmd 가 한글 줄 뒤 줄 위치를 잘못 세어
+    줄 조각을 명령으로 실행했다. 이 PC 에서는 재현되지 않아 파일은 그대로 두고, 고친 뒤 깨지면 여기서 잡는다.
+    ★ 임시 폴더 사본 + PATH 는 System32 뿐 — .venv·python·npx 를 못 찾아 '없다' 분기에서 끝난다 (빌드·배포 안 됨)."""
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+
+    log.info("▶ .bat 실제 실행 — 한글 줄·종료 코드 (빌드·배포는 일어날 수 없다)")
+    system32 = Path(os.environ["SystemRoot"]) / "System32"
+    hidden = subprocess.STARTUPINFO()
+    hidden.dwFlags, hidden.wShowWindow = subprocess.STARTF_USESHOWWINDOW, 0      # 새 콘솔을 숨긴다
+    out = []
+    for name, want in (("build_tool.bat", "[오류] .venv 가 없습니다."),
+                       ("deploy_web.bat", "[실패] .env 의 SUPABASE_URL")):
+        with tempfile.TemporaryDirectory(prefix="probe_bat_") as tmp:
+            shutil.copy2(settings_mod.PROJECT_ROOT / name, Path(tmp) / name)
+            done = subprocess.run([str(system32 / "cmd.exe"), "/c", str(Path(tmp) / name)], cwd=tmp,
+                                  env={"SystemRoot": os.environ["SystemRoot"], "PATH": str(system32)},
+                                  stdin=subprocess.DEVNULL, capture_output=True, timeout=60,
+                                  creationflags=subprocess.CREATE_NEW_CONSOLE, startupinfo=hidden)
+        text = done.stdout.decode("utf-8", "replace")
+        error = done.stderr.decode("utf-8", "replace")
+        out.append(check(f"{name} — 한글 줄이 그대로 찍히고 줄 조각이 명령으로 새지 않는다",
+                         want in text and "is not recognized" not in error, (text + error)[-160:]))
+        out.append(check(f"{name} — 한글 줄 뒤 exit /b 1 까지 간다", done.returncode == 1, f"exit {done.returncode}"))
+    return out
+
+
 def main() -> int:
     setup_logging()
     from tools import probe_guard
@@ -319,7 +349,7 @@ def main() -> int:
     # 실행 창을 만들면 그것만으로 서버 확인이 나가고, 아직 안 묶인 빌드가 이 PC 에 묶인다 (09-28)
     with probe_guard.offline():
         results = [*check_fields(), *check_parse(), *check_window(), *check_locked_run_window(),
-                   *check_register(), *check_locked_keys(), *check_baked_required()]
+                   *check_register(), *check_locked_keys(), *check_baked_required(), *check_bats()]
     log.info("결과: 통과 %d / 실패 %d", sum(results), len(results) - sum(results))
     return 0 if all(results) else 1
 

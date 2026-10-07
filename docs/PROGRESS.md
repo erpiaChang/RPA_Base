@@ -145,7 +145,7 @@
 | `probe_hooks.py` | 훅이 막을 것을 막는지 — 조작 실행·경로·비밀 키·서버 쓰기·실서버 SQL(APPROVED-SQL)·서브에이전트·PowerShell·규칙 경고(`wait_for_timeout`)·GitHub 에 올리기(`git push`·`gh repo create`·`--no-verify`·`npx wrangler@4 deploy`)·서브에이전트의 `.env`·구운 설정 읽기(대소문자 섞어도)·git/gh 다른 꼴(`git.exe`·`-C`·`bash -c`·커밋 검사 끄기·훅 자리 바꾸기·`gh gist/release/api` 쓰기)·서브에이전트의 셸 재귀 검색·비밀 파일 역슬래시 경로 (134) |
 | `probe_leaks.py` | **git 에 실값이 없나** (10-02) — 낱말 목록 없이 `settings.local.json`·`.env`·git 밖 사이트/업체 파일·이 PC 이름에서 값을 뽑고, 메일·전화·사용자 경로·내부 IP 모양도 본다. `파일:줄 — 어디서 온 값` 만 찍는다. 인자 없이 = 추적·새 파일의 지금 내용 / `--staged`(`.githooks/pre-commit`) / `--pre-push`(`pre-push`, 올리는 커밋만) / `--history`(손으로, 모든 ref) / `--selftest` (44). 감싼 비밀번호(dpapi:·baked:)는 풀어서 평문도 찾는다. 설정·.env 를 못 읽으면 커밋·push 를 막는다 |
 | `probe_history.py` | 지난 실행 이력·[실행 기록] 탭·건너뛴 예약(기록 파일·이어지면 한 줄) (19) |
-| `probe_build.py` | 빌드 프로그램·기능 고정 빌드·빌드 등록(가짜 서버)·고정값 잠금 `LOCKED_KEYS`·구울 값 기능별 목록(`modules.baked_required`) (35) |
+| `probe_build.py` | 빌드 프로그램·기능 고정 빌드·빌드 등록(가짜 서버)·고정값 잠금 `LOCKED_KEYS`·구울 값 기능별 목록(`modules.baked_required`)·`.bat` 진짜 cmd 실행(한글 줄·종료 코드 — 임시 사본, python·npx 를 못 찾게, 10-07) (39) |
 | `probe_telemetry.py` | 서버 보고 — 가짜 서버로 이벤트·outbox·401 버림·끊김·심박·비밀 값 없음·서버 확인(바인딩·잠금)·알림(따로·outbox 없이·서버 종류와 같게)·서버 인증서 오류(구분 문구·루트 채우기 1회, 10-07) (67) |
 | `probe_web.py` | 웹 정적 검사 — innerHTML·SRI·CSP·비밀·제어 단추·탭·사용량·실행 중 설정 잠금·매출처리 칸·실행 상세 자동 갱신·설정 칸 기본값 없음·매출처리·택배사·박스 요구·node 구문 (63) — git 의 web/ 에는 주소·키 없이 자리표시만·build_web |
 | `probe_web_shot.py` | 웹 화면 찍기 — Edge 로 가짜 데이터를 넣어 세 폭으로 찍고 콘솔 오류·'null'·남의 업체·가로 스크롤 검사 (15) |
