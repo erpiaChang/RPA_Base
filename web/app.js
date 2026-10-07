@@ -31,6 +31,7 @@ const ONLINE_TEXT = "켜져 있음", OFFLINE_TEXT = "꺼짐 (연결 안 됨)";  
 const USAGE_COLS = [["mail", "메일 엑셀 받기"], ["orders", "주문수집·매출처리"], ["logistics_wait", "물류대기"], ["logistics", "물류관리"]];
 const PERIODS = [["this", "이번 달"], ["last", "지난달"], ["30", "최근 30일"]];
 const TABS = [["home", "요약"], ["usage", "사용량"], ["devices", "PC"], ["history", "실행 기록"]];
+const PW_MIN = 8, PW_MAX = 72;   // 새 비밀번호 길이 (72 = 인증 서버 상한, 10-07)
 
 const cfg = window.RPA_CONFIG || {};
 const main = document.getElementById("main");
@@ -160,8 +161,70 @@ function renderLogin(msg) {
   main.appendChild(form);
 }
 
+// ---------------------------------------------------------------- 본인 비밀번호 바꾸기 (#/account, 10-07)
+function passwordProblem(cur, nw, nw2) {
+  if (!cur) return "현재 비밀번호를 넣으세요.";
+  if (nw.length < PW_MIN) return `새 비밀번호는 ${PW_MIN}자 이상이어야 합니다.`;
+  if (nw.length > PW_MAX) return `새 비밀번호는 ${PW_MAX}자 이하여야 합니다.`;
+  if (nw !== nw2) return "다시 입력한 비밀번호가 다릅니다.";
+  if (nw === cur) return "지금 비밀번호와 같습니다.";
+  return "";
+}
+
+// 현재 비밀번호로 다시 확인 → 바꾸기 → 다른 곳의 로그인 끊기. 서버 글은 쓰지 않고 오류 코드만 문구로 바꾼다
+async function changePassword(cur, nw) {
+  const email = me && me.email;
+  if (!email) return { ok: false, text: "로그인 정보를 읽지 못했습니다. 다시 로그인하세요." };
+  const re = await sb.auth.signInWithPassword({ email, password: cur });
+  if (re.error) {
+    if (re.error.status === 400) return { ok: false, text: "현재 비밀번호가 맞지 않습니다." };
+    if (re.error.status === 429) return { ok: false, text: "시도가 너무 많습니다. 잠시 뒤 다시 하세요." };
+    return { ok: false, text: `확인하지 못했습니다 (${re.error.code || re.error.status || "연결"}).` };
+  }
+  const up = await sb.auth.updateUser({ password: nw });
+  if (up.error) {
+    const code = up.error.code || "";
+    if (code === "same_password") return { ok: false, text: "지금 비밀번호와 같습니다." };
+    if (code === "weak_password") return { ok: false, text: "비밀번호가 너무 짧거나 단순합니다." };
+    if (up.error.status === 429) return { ok: false, text: "시도가 너무 많습니다. 잠시 뒤 다시 하세요." };
+    return { ok: false, text: `바꾸지 못했습니다 (${code || up.error.status || "연결"}).` };
+  }
+  const out = await sb.auth.signOut({ scope: "others" });
+  return { ok: true, text: out.error
+    ? "비밀번호를 바꿨습니다. 다른 곳의 로그인은 끊지 못했습니다."
+    : "비밀번호를 바꿨습니다. 다른 기기에서는 다시 로그인해야 합니다." };
+}
+
+function renderAccount() {
+  const cur = h("input", { id: "pwCur", type: "password", autocomplete: "current-password", required: "" });
+  const nw = h("input", { id: "pwNew", type: "password", autocomplete: "new-password", required: "", maxlength: String(PW_MAX) });
+  const nw2 = h("input", { id: "pwNew2", type: "password", autocomplete: "new-password", required: "", maxlength: String(PW_MAX) });
+  const msg = h("div", { id: "pwMsg", class: "note", role: "status", text: "" });
+  const submit = h("button", { id: "pwSubmit", class: "primary", type: "submit", text: "비밀번호 바꾸기" });
+  const form = h("form", { class: "login account", onsubmit: async e => {
+    e.preventDefault();
+    if (submit.disabled) return;                    // 두 번 눌러도 요청이 겹치지 않게
+    const problem = passwordProblem(cur.value, nw.value, nw2.value);
+    if (problem) { msg.className = "err"; msg.textContent = problem; return; }
+    submit.disabled = true;
+    msg.className = "note"; msg.textContent = "바꾸는 중...";
+    const result = await changePassword(cur.value, nw.value);
+    if (!form.isConnected) return;                  // 기다리는 사이 다른 화면으로 갔다
+    submit.disabled = false;
+    if (result.ok) cur.value = nw.value = nw2.value = "";
+    msg.className = result.ok ? "note" : "err";
+    msg.textContent = result.text;
+  } }, h("h2", { text: "비밀번호 바꾸기" }), h("div", { class: "note", text: (me && me.email) || "" }),
+     h("label", {}, "현재 비밀번호", cur), h("label", {}, `새 비밀번호 (${PW_MIN}자 이상)`, nw),
+     h("label", {}, "새 비밀번호 다시", nw2), submit, msg,
+     h("button", { type: "button", text: "돌아가기", onclick: () => go("#/home") }));
+  main.appendChild(form);
+  cur.focus();
+}
+
 function showHeader(on) {
   document.getElementById("logoutBtn").classList.toggle("hidden", !on);
+  document.getElementById("pwBtn").classList.toggle("hidden", !on);
   document.getElementById("tabs").classList.toggle("hidden", !on);
   document.getElementById("helpBtn").classList.toggle("hidden", !on);
   if (!on) {
@@ -230,6 +293,7 @@ function render() {
   const [, page, id] = (location.hash || "#/home").split("/");
   stopTimers();
   clear(main);
+  if (page === "account") { markTab(""); renderAccount(); return; }
   if (page === "device" && id) { markTab("devices"); renderDevice(id); return; }
   if (page === "run" && id) { markTab("history"); renderDetail(id); return; }
   const known = TABS.some(t => t[0] === page) ? page : "home";
@@ -1191,6 +1255,7 @@ const help = (() => {
   document.getElementById("logoutBtn").addEventListener("click", async () => {
     stopTimers(); await sb.auth.signOut();
   });
+  document.getElementById("pwBtn").addEventListener("click", () => go("#/account"));
   window.addEventListener("hashchange", render);
   boot();
 })();

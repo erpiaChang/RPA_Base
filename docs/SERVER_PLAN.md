@@ -161,7 +161,7 @@
 | --- | --- |
 | 권한 | 표 권한은 anon·authenticated 모두 0 (authenticated 는 select + RLS). 함수 실행 권한도 기본으로 뺀다(`alter default privileges … revoke execute`) — **Supabase 는 새 함수에 anon 실행을 기본으로 준다.** 쓰기는 RPC 로만 |
 | RLS | 모든 표. 읽기 `private.is_admin() or account_id in (select private.my_account_ids())`, 도우미는 `private` 스키마(API 비노출). `service_role` 키는 어디에도 두지 않는다 |
-| 사용자 | 이메일 가입 끔 — 관리자가 콘솔에서 만들고 `account_members` 에 넣는다. 비밀번호 재설정도 콘솔 (무료 SMTP 는 시간당 2통) |
+| 사용자 | 이메일 가입 끔 — 관리자가 콘솔에서 만들고 `account_members` 에 넣는다. 비밀번호 재설정도 콘솔 (무료 SMTP 는 시간당 2통). **본인 비밀번호 바꾸기는 웹 [비밀번호 변경]**(`#/account`, 10-07) — 현재 비밀번호로 다시 확인 → `updateUser` → 다른 곳의 로그인 끊기(`signOut({scope:"others"})`). 8~72자 |
 | 보고기 | RPA 스레드는 `put_nowait` 만 — 전송을 기다리지 않는다. 5xx·네트워크·타임아웃만 outbox, **401·400·429 는 버리고** 사용자 로그에 한 줄. outbox 에 빌드 ID 를 넣지 않는다. ssl 기본 검증을 끄지 않는다 — 인증서 오류면 PowerShell 로 서버에 한 번 접속해 Windows 가 루트 인증서를 받게 하고 새 문맥으로 한 번 더 보낸다(프로세스당 1회, 갓 설치한 Windows 대비, 10-07). dry-run 은 보내지 않는다 |
 | 웹 | DOM 은 `textContent` 만 (`innerHTML`·`eval` 금지 — 서버 문자열은 PC 가 보낸 것이다). CSP `script-src 'self'` + CDN 은 SRI 고정, 인라인 스크립트 없음. 못 읽은 숫자는 '—' (지어내지 않는다). 세션은 `sessionStorage` + 로그아웃 (무료 플랜엔 세션 시간 제한이 없다) |
 | cron | `mark_lost` 5분(10분 무응답 → `lost` + 알림) · `purge_old` 매일(180일, `usage_daily` 는 남긴다) · `send_alerts` 1분(`pg_net` → 메일 API, 키는 Vault, 10-02). **Edge Function 은 만들지 않는다**. `ingest` 는 run_id 없는 이벤트를 idle·alert 말고는 400 으로 거른다 (10-02) |

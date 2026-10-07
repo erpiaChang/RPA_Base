@@ -119,8 +119,13 @@ FAKE = r"""
   }
   const session = role === "none" ? null : { user: { id: "u-1", email: role === "admin" ? "admin@example.com" : "owner@a.example" } };
   window.supabase = { createClient: () => ({
-    auth: { getSession: async () => ({ data: { session } }), signInWithPassword: async () => ({ error: { message: "x" } }),
-            signOut: async () => ({}), onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }) },
+    // 비밀번호 바꾸기 시험 (10-07): window.__PW 와 같으면 로그인 통과, updateUser·signOut 은 받은 값을 남긴다
+    auth: { getSession: async () => ({ data: { session } }),
+            signInWithPassword: async ({ password }) => password && password === window.__PW
+              ? { data: { session }, error: null } : { error: { message: "x", status: 400 } },
+            updateUser: async ({ password }) => { window.__UPDATED = password; return { data: {}, error: null }; },
+            signOut: async (opts) => { window.__SIGNOUT = (opts && opts.scope) || "local"; return { error: null }; },
+            onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }) },
     from: name => new Q(name),
     rpc: async (name) => name === "llm_online" ? { data: true, error: null } : { data: 1, error: null },
     members,
@@ -241,9 +246,42 @@ def main() -> int:
             out.append(check("사용량 카드 숫자가 카드 밖으로 넘치지 않는다", over == 0, f"{over}개 넘침"))
             page.close()
 
+            log.info("▶ 비밀번호 바꾸기 (#/account, 10-07)")
+            page = shoot(browser, "16_owner_account", "owner", "#/home", DESKTOP, errors)
+            page.evaluate("window.__PW = 'old-pass-1'")
+            out.append(check("머리줄에 [비밀번호 변경] — 누르면 #/account",
+                             page.is_visible("#pwBtn") and (page.click("#pwBtn") or True)
+                             and page.wait_for_selector("#pwCur") is not None and page.url.endswith("#/account")))
+            out.append(check("입력 셋은 모두 가려진 칸(password)", page.evaluate(
+                "['pwCur','pwNew','pwNew2'].every(i => document.getElementById(i).type === 'password')")))
+
+            def submit(cur: str, new: str, again: str) -> str:
+                page.fill("#pwCur", cur)
+                page.fill("#pwNew", new)
+                page.fill("#pwNew2", again)
+                page.click("#pwSubmit")
+                page.wait_for_function("document.getElementById('pwMsg').textContent !== '바꾸는 중...'")
+                return page.inner_text("#pwMsg")
+
+            got = submit("old-pass-1", "short7!", "short7!")
+            out.append(check("새 비밀번호가 짧으면 바꾸지 않는다", "8자 이상" in got
+                             and page.evaluate("window.__UPDATED") is None, got))
+            got = submit("old-pass-1", "new-pass-22", "new-pass-23")
+            out.append(check("다시 입력이 다르면 바꾸지 않는다", "다릅니다" in got, got))
+            got = submit("wrong-pass", "new-pass-22", "new-pass-22")
+            out.append(check("★ 현재 비밀번호가 틀리면 바꾸지 않는다", "맞지 않습니다" in got
+                             and page.evaluate("window.__UPDATED") is None, got))
+            got = submit("old-pass-1", "new-pass-22", "new-pass-22")
+            out.append(check("★ 맞으면 바꾸고 다른 곳의 로그인을 끊는다 — 입력칸은 비운다",
+                             "바꿨습니다" in got and page.evaluate("window.__UPDATED") == "new-pass-22"
+                             and page.evaluate("window.__SIGNOUT") == "others" and page.input_value("#pwNew") == "",
+                             got))
+            page.screenshot(path=str(OUT / "16_owner_account.png"), full_page=True)
+            page.close()
+
             log.info("▶ 휴대폰 폭")
             for name, hash_, help_ in (("12_phone_home", "#/home", False), ("13_phone_usage", "#/usage", False),
-                                       ("14_phone_help", "#/home", True)):
+                                       ("14_phone_help", "#/home", True), ("17_phone_account", "#/account", False)):
                 page = shoot(browser, name, "admin", hash_, PHONE, errors, questions=4, open_help=help_)
                 wide = page.evaluate("document.scrollingElement.scrollWidth - window.innerWidth")
                 out.append(check(f"{name} — 가로 스크롤 없음", wide <= 1, f"{wide}px 넘침"))

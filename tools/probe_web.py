@@ -214,6 +214,19 @@ def main() -> int:
     out.append(check("세션은 sessionStorage (탭 닫으면 끝) + 로그아웃 + 만료 처리",
                      "sessionStorage" in app and "signOut" in app and "SIGNED_OUT" in app))
     out.append(check("가입 없음 — signUp 을 부르지 않는다", "signUp" not in app))
+    log.info("▶ 본인 비밀번호 바꾸기 (#/account, 10-07)")
+    out.append(check("현재 비밀번호로 다시 확인 → updateUser → 다른 곳의 로그인 끊기(scope others)",
+                     app.count("signInWithPassword") >= 2 and "auth.updateUser({ password" in app
+                     and 'signOut({ scope: "others" })' in app))
+    out.append(check("입력칸 — 현재는 current-password, 새 것은 new-password, 모두 type password",
+                     'id: "pwCur", type: "password", autocomplete: "current-password"' in app
+                     and app.count('autocomplete: "new-password"') == 2))
+    out.append(check("비밀번호 값이 console 로 새지 않는다",
+                     not re.search(r"console\.\w+\([^)]*\b(cur|nw|nw2|pw|password)\b", app)))
+    out.append(check("[비밀번호 변경] 단추는 숨긴 채 시작하고 로그인하면 보인다, 화면은 탭 분기보다 앞",
+                     '<button id="pwBtn" class="hidden">' in html and 'getElementById("pwBtn").classList.toggle' in app
+                     and 0 <= app.find('page === "account"') < app.find('page === "device"')))
+    out.append(check("새 비밀번호 길이 8~72 (72 = 인증 서버 상한)", "PW_MIN = 8, PW_MAX = 72" in app))
     # wrangler 배포 (09-28): 이름이 주소다. README·설정 파일은 올리지 않는다
     wrangler = (WEB / "wrangler.jsonc").read_text(encoding="utf-8")
     out.append(check("wrangler.jsonc — 이름 rpa-dashboard, 올리는 폴더 build/web (자리표시를 채운 것)",
