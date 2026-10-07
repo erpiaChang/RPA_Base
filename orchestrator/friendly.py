@@ -54,6 +54,13 @@ def _missing_choice(exc, match) -> str:
     return text + f"\n실행 화면 [설정]의 [{what}] 칸을 목록에 있는 이름과 글자까지 똑같이 고치세요."
 
 
+def _no_browser(_exc, match) -> str:
+    from collect.browser import BROWSER_NAMES
+
+    return (f"메일 사이트를 열 브라우저({BROWSER_NAMES.get(match.group(1), match.group(1))})가 이 PC 에 없습니다.\n"
+            "그 브라우저를 설치한 뒤 다시 실행하세요. 설치할 수 없으면 프로그램을 설치해 준 담당자에게 문의하세요.")
+
+
 def _rejected(exc, _match) -> str:
     raw = (getattr(exc, "raw_text", "") or "").strip()
     return ("ERPia가 로그인을 받지 않았습니다.\n"
@@ -124,6 +131,7 @@ RULES = (
     ("collect.webmail.SiteMissing", None,
      "이 프로그램에는 메일 사이트 연결이 아직 없습니다.\n"
      "[실행할 기능]에서 메일 엑셀 받기를 빼고 실행하거나, 프로그램을 설치해 준 담당자에게 문의하세요."),
+    ("collect.browser.BrowserError", r"실행 파일이 없다: (\w+)", _no_browser),
     ("collect.browser.BrowserError", r"browser_channel",
      "메일 사이트를 열 브라우저가 정해져 있지 않습니다.\n프로그램을 설치해 준 담당자에게 문의하세요."),
     ("collect.browser.BrowserError", None,

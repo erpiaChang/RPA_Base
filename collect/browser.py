@@ -14,6 +14,7 @@ from utils.logger import get_logger
 log = get_logger(__name__)
 
 CHANNELS = ("msedge", "chrome")       # 설정 browser_channel 의 선택지 (gui/build_app.py 칸도 이것)
+BROWSER_NAMES = {"msedge": "Microsoft Edge", "chrome": "Google Chrome"}   # 사용자에게 보일 이름
 
 
 class BrowserError(RuntimeError):
@@ -26,6 +27,7 @@ def browser_page():
     channel = SETTINGS.browser_channel
     if channel not in CHANNELS:
         raise BrowserError(f"브라우저 종류(browser_channel)가 비었거나 틀렸다: {channel!r} — {' / '.join(CHANNELS)}")
+    from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
 
     from collect import pw_driver
@@ -33,11 +35,17 @@ def browser_page():
     pw_driver.prepare()            # 빌드본: exe 리소스의 node.exe 를 꺼내 쓴다 (09-29)
     with sync_playwright() as pw:
         args = ["--inprivate"] if channel == "msedge" else []
-        browser = pw.chromium.launch(
-            channel=channel,
-            headless=bool(SETTINGS.browser_headless),     # 비면 창을 띄운다 — 2차 인증이 막히면 사람이 봐야 한다
-            args=args,
-        )
+        try:
+            browser = pw.chromium.launch(
+                channel=channel,
+                headless=bool(SETTINGS.browser_headless),     # 비면 창을 띄운다 — 2차 인증이 막히면 사람이 봐야 한다
+                args=args,
+            )
+        except PlaywrightError as exc:
+            # Playwright 문구 "Chromium distribution 'msedge' is not found at ..." — 이때만 사람 말로 (10-07)
+            if f"'{channel}' is not found" in str(exc):
+                raise BrowserError(f"브라우저 실행 파일이 없다: {channel}") from exc
+            raise
         context = browser.new_context(accept_downloads=True)
         context.set_default_timeout(int(SETTINGS.timeouts.page_load * 1000))
         page = context.new_page()

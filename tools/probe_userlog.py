@@ -413,6 +413,7 @@ def check_friendly() -> list[bool]:
     found = leaks({"lines": [crashlog.CRASH_TEXT, crashlog.START_FAIL_TEXT, telemetry.CERT_FAIL_TEXT],
                    "statuses": [], "summary": "", "failure": "", "steps": []})
     out.append(check("처리 안 된 예외·서버 인증서 알림 글에 내부 값이 없다 (10-07)", not found, str(found)))
+    out += _check_no_browser()
 
     log.info("▶ 암호 걸린 엑셀 알아보기 (파일 머리 8바이트)")
     from automation.order_mapping import OLE_SIGNATURE, password_state
@@ -421,6 +422,54 @@ def check_friendly() -> list[bool]:
                      password_state(b"PK\x03\x04\x14\x00\x06\x00", ".xlsx") is False))
     out.append(check("xls 는 모른다 (원래 OLE)", password_state(OLE_SIGNATURE, ".xls") is None))
     out.append(check("알 수 없는 머리는 모른다", password_state(b"<html>..", ".xlsx") is None))
+    return out
+
+
+def _check_no_browser() -> list[bool]:
+    """브라우저(Edge/Chrome)가 없을 때 (10-07) — Playwright 문구 대신 이름과 할 일. 진짜 브라우저는 안 띄운다."""
+    log.info("▶ 브라우저 없음 (10-07)")
+    import playwright.sync_api as pw_api
+
+    from config.settings import SETTINGS
+
+    got = friendly.explain(browser.BrowserError("브라우저 실행 파일이 없다: msedge"))
+    out = [check("브라우저가 없으면 이름과 할 일 — 내부 이름 없이",
+                 "Microsoft Edge" in got and "설치" in got and "msedge" not in got, got)]
+    got = friendly.explain(browser.BrowserError("브라우저 종류(browser_channel)가 비었거나 틀렸다: ''"))
+    out.append(check("브라우저가 안 정해진 것은 그대로 담당자 문의", "정해져 있지 않습니다" in got, got))
+
+    class Chromium:
+        def __init__(self, message):
+            self.message = message
+
+        def launch(self, **kwargs):
+            raise pw_api.Error(self.message)
+
+    def fake_playwright(message):
+        @contextmanager
+        def sync_playwright():
+            yield SimpleNamespace(chromium=Chromium(message))
+        return sync_playwright
+
+    def launch_error(message):
+        pw_api.sync_playwright = fake_playwright(message)
+        try:
+            with browser.browser_page():
+                return None
+        except Exception as exc:        # noqa: BLE001 — 무엇이 올라오는지 본다
+            return exc
+
+    keep = (pw_api.sync_playwright, SETTINGS.browser_channel)
+    try:
+        SETTINGS.browser_channel = "msedge"
+        missing = launch_error("Chromium distribution 'msedge' is not found at C:\\가짜\\msedge.exe")
+        other = launch_error("가짜 — 다른 실행 오류")
+    finally:
+        pw_api.sync_playwright, SETTINGS.browser_channel = keep
+    out.append(check("실행 파일이 없다는 Playwright 오류만 BrowserError 로 바꾼다 (원인은 남긴다)",
+                     isinstance(missing, browser.BrowserError) and missing.__cause__ is not None
+                     and isinstance(other, pw_api.Error) and not isinstance(other, browser.BrowserError),
+                     f"{missing!r} / {other!r}"))
     return out
 
 
