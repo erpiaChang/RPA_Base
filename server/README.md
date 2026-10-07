@@ -121,6 +121,20 @@ curl -X POST "https://<ref>.supabase.co/rest/v1/rpc/ingest" ^
 
 `select * from public.devices;` 에서 `last_seen_at` 이 바뀌면 끝. 이 curl 은 실서버에 쓰므로 Claude 가 돌릴 때는 `APPROVED-RUN` 이 필요하다.
 
+## 7. 권한·RLS 시험 (10-07)
+
+`server/tests/rls_check.sql` — 가짜 두 업체·사용자로 남의 업체 읽기·anon 표 읽기·표 직접 쓰기·잘못된 빌드 ID·다른 PC·제어 RPC·
+업체 중지(적용돼 있으면)를 **실제로 거부시켜** 본다. 확인 도구는 schema.sql 글자만 대조하므로 정책이 실제로 막는지는 이것으로 본다.
+한 DO 블록(한 트랜잭션)이고 **끝에서 일부러 예외를 던져 전부 되돌린다.** 결과는 오류 문구다: `RLS_CHECK_OK n/n (되돌림)` 이면 통과,
+`RLS_CHECK_FAIL` 이면 줄마다 어디가 틀렸는지 나온다. 스키마·정책·권한을 고쳐 적용한 뒤마다 한 번 돌린다.
+실서버에 쓰는 SQL 이라 사용자에게 보인 뒤 본문 첫 줄에 `-- APPROVED-SQL: ...` 을 붙인다. 운영 시간대는 피한다 (수 초 행 잠금).
+
+## 8. 업체 단위 중지 (10-07)
+
+`select public.suspend_account('<업체 id>');` — 그 업체의 모든 빌드가 다음 보고·poll 에서 401 이라 실행 창이 잠기고, 그 업체 owner 의
+웹 [실행]·설정 저장은 403. 읽기·자료·빌드는 그대로라 `select public.resume_account('<업체 id>');` 로 되돌린다. SQL 로만 부른다
+(관리자 화면 없음). 중지 중 끊긴 실행은 10분 뒤 `lost` 로 바뀌고 알림 메일이 갈 수 있다.
+
 ## 지우는 것
 
 180일 지난 `runs`(하위 표 포함)는 매일 03:30(KST, pg_cron 은 UTC 라 SQL 에는 18:30) 에 자동 삭제된다. 그 전에 받으려면 대시보드 [엑셀로 내려받기] (③).

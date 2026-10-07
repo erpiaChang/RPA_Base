@@ -32,6 +32,9 @@ create table if not exists public.accounts (
     name        text not null check (length(name) <= 100),
     created_at  timestamptz not null default now()
 );
+-- 업체 단위 중지 (10-07): 값이 있으면 그 업체의 모든 빌드가 ingest·poll 에서 401 (private.bind_device), owner 의 웹 제어 403
+-- (private.can_control). 읽기는 그대로. 중지·재개는 public.suspend_account / resume_account (SQL 로만). 자료는 지우지 않는다
+alter table public.accounts add column if not exists suspended_at timestamptz;
 
 create table if not exists public.devices (
     id               uuid primary key default gen_random_uuid(),
@@ -272,6 +275,10 @@ begin
     where d.key_hash = encode(sha256(convert_to(coalesce(device_key, ''), 'UTF8')), 'hex')
       and d.revoked_at is null;
     if not found then
+        raise exception 'unauthorized' using errcode = 'PT401';
+    end if;
+    -- 중지된 업체 (10-07) — 폐기·다른 PC 와 같은 401 (이유를 알리지 않는다). PC 에 묶기 전에 막는다
+    if exists (select 1 from public.accounts a where a.id = v_dev.account_id and a.suspended_at is not null) then
         raise exception 'unauthorized' using errcode = 'PT401';
     end if;
     v_machine := encode(sha256(convert_to(coalesce(machine, ''), 'UTF8')), 'hex');
@@ -545,6 +552,36 @@ language sql security definer set search_path = '' as $$
     update public.devices set revoked_at = now() where id = device;
 $$;
 revoke execute on function public.revoke_device(uuid) from public, anon, authenticated;
+
+-- 업체 중지·재개 (10-07). 중지하면 그 업체의 모든 빌드가 401 이고 실행 창이 잠긴다 — PC 마다 폐기하지 않아도 된다.
+-- 자료·빌드는 그대로라 재개하면 다시 돈다. 부르는 화면이 없어 SQL 로만 (revoke_device 와 같은 꼴)
+create or replace function public.suspend_account(account uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+    if session_user <> 'postgres' and not private.is_admin() then
+        raise exception 'forbidden' using errcode = 'PT403';
+    end if;
+    update public.accounts set suspended_at = coalesce(suspended_at, now()) where id = account;
+    if not found then
+        raise exception 'bad request' using errcode = 'PT400';
+    end if;
+end;
+$$;
+revoke execute on function public.suspend_account(uuid) from public, anon, authenticated;
+
+create or replace function public.resume_account(account uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+    if session_user <> 'postgres' and not private.is_admin() then
+        raise exception 'forbidden' using errcode = 'PT403';
+    end if;
+    update public.accounts set suspended_at = null where id = account;
+    if not found then
+        raise exception 'bad request' using errcode = 'PT400';
+    end if;
+end;
+$$;
+revoke execute on function public.resume_account(uuid) from public, anon, authenticated;
 -- ---------------------------------------------------------------------------------------------
 -- 6. 정리 잡 (pg_cron, **UTC**) — 끊김 판정 5분 / 180일 삭제 하루(18:30 UTC = 03:30 KST) / 알림 메일 1분
 -- ---------------------------------------------------------------------------------------------
@@ -783,7 +820,11 @@ create or replace function private.can_control(account uuid) returns boolean
 language sql stable security definer set search_path = '' as $$
     select exists (select 1 from public.account_members m
                    where m.user_id = (select auth.uid())
-                     and (m.role = 'admin' or (m.role = 'owner' and m.account_id = account)));
+                     and (m.role = 'admin'
+                          or (m.role = 'owner' and m.account_id = account
+                              -- 중지된 업체의 owner 는 제어 못 한다 (10-07). admin 은 그대로
+                              and not exists (select 1 from public.accounts a
+                                              where a.id = account and a.suspended_at is not null))));
 $$;
 revoke execute on function private.can_control(uuid) from public, anon, authenticated;
 

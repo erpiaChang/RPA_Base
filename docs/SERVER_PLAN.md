@@ -151,7 +151,7 @@
 
 **`ingest` 검사 순서** (`security definer`, `set search_path = ''`, 이름은 전부 `public.`):
 1. 크기 상한 — 본문 64 KB, 이벤트 100개를 넘으면 400
-2. 신원 — 빌드 ID sha256 + MachineGuid (`private.bind_device`). 없거나·폐기됐거나·다른 PC 면 **같은 문구로** 401 (이유를 알리지 않는다)
+2. 신원 — 빌드 ID sha256 + MachineGuid (`private.bind_device`). 없거나·폐기됐거나·업체가 중지됐거나(`accounts.suspended_at`, 10-07)·다른 PC 면 **같은 문구로** 401 (이유를 알리지 않는다)
 3. 하루 상한 — 50실행·2만 이벤트를 넘으면 429 (빌드 ID 가 새도 DB 를 못 채운다)
 4. `runs` 를 먼저 보장 (`on conflict do nothing`) — `run_start` 가 유실돼도 고아가 안 생긴다
 5. run_id 소유 — 다른 기기의 실행이면 요청 전체 거부 (run_id 는 웹 주소에 보여 비밀이 아니다)
