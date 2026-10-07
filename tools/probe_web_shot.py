@@ -81,6 +81,8 @@ FAKE = r"""
   // 설정은 서버 표에 없다 (10-07) — PC 의 답(take_settings)으로만 온다
   const SNAP = { locked_modules: null,
     settings: { run_modules: ["mail", "orders", "logistics_wait", "logistics"], collect_sources: ["excel", "site"], delivery_company: "택배사A", delivery_box: "박스A",
+                // 빈 무선 주소는 PC 가 "" 로 보낸다 — 웹 칸(null)과 같게 봐야 저장 때 같이 가지 않는다 (10-07 검토)
+                adb_wireless_address: "",
                 logistics_mode: "자동", sales_mode: "전체", hold_exclude_codes: [], sms_source: "phonelink", adb_connection: "usb", auto_run_enabled: true,
                 auto_run_mode: "daily", auto_run_times: ["평일 09:00 mail,orders"], auto_run_interval_minutes: 60 } };
   const role = window.__ROLE || "none";

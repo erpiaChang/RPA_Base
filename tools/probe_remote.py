@@ -230,9 +230,9 @@ def check_window() -> list[bool]:
             fake.inbox.put((remote.SETTINGS_EVENT, 5, web))
             window.busy = True
             window._drain_remote()
-            out.append(check("★ 실행 중에는 웹 설정을 미룬다 (도는 회차 값을 바꾸지 않는다)",
+            out.append(check("★ 실행 중에는 웹 설정을 미루고, 적용 전에는 결과를 알리지 않는다 (웹엔 '처리 중')",
                              window.box_var.get() != "박스B" and window._pending_remote is not None
-                             and fake.results[-1] == (5, "실행 중이라 끝난 뒤 적용한다"), str(fake.results[-1:])))
+                             and not fake.results, str(fake.results[-1:])))
             fake.inbox.put((remote.READ_EVENT, 6))
             window._drain_remote()
             out.append(check("실행 중 설정 보기는 끝난 뒤 적용할 웹 값까지 답한다",
@@ -240,6 +240,9 @@ def check_window() -> list[bool]:
             window.busy = False
             window._drain_remote()
             saved = json.loads(temp.read_text(encoding="utf-8")) if temp.exists() else {}
+            out.append(check("끝나 적용한 뒤에 그 명령의 결과를 알린다",
+                             fake.results and fake.results[-1][0] == 5 and fake.results[-1][1].startswith("적용함"),
+                             str(fake.results[-1:])))
             out.append(check("★ 끝나면 적용한다 — 화면 칸·설정 파일",
                              window.box_var.get() == "박스B" and window.courier_var.get() == "웹택배"
                              and window.mode_var.get() == "수동" and window.hold_var.get() == "111; 222"

@@ -27,7 +27,7 @@ log = get_logger(__name__)
 
 POLL = "/rest/v1/rpc/poll"
 POLL_SECONDS = 30.0
-RESPONSE_LIMIT = 65536          # 설정이 실린 응답 (서버 check 가 8KB)
+RESPONSE_LIMIT = 65536          # 웹 설정이 실린 응답 (서버 clean_settings 상한 15KB)
 
 # 웹에서 바꿀 수 있는 설정 (사용자 확정 09-28 — 비밀번호 빼고, PC 마다 다른 경로도 뺀다).
 # `server/schema.sql` 의 `private.clean_settings` 와 **같은 목록**이어야 한다 — 모르는 키는 서버가 거부한다.

@@ -243,6 +243,7 @@ class RunWindow(ErpiaWindow):
         self.remote: remote.Remote | None = None
         self.remote_run = False                 # 지금 회차가 웹의 [실행] 으로 시작됐다
         self._pending_remote: dict | None = None    # 실행 중에 받은 웹 설정 — 끝나면 적용한다
+        self._pending_ids: list[int] = []           # 그 설정 명령 — 결과는 적용한 뒤에 알린다 (웹엔 그때까지 '처리 중')
         # 자동 켜기 (09-28). 빌드본(exe)에서만 — 개발 중에 python 을 등록하지 않는다
         self.frozen = bool(getattr(sys, "frozen", False))
         self.autostart_var = tk.BooleanVar(value=bool(getattr(SETTINGS, "auto_start", None)))
@@ -1462,9 +1463,8 @@ class RunWindow(ErpiaWindow):
             elif event[0] == remote.SETTINGS_EVENT:
                 _kind, command_id, values = event
                 self._pending_remote = {**(self._pending_remote or {}), **values}
-                applied = self._apply_pending_remote()
-                self.remote.done(command_id, "실행 중이라 끝난 뒤 적용한다" if self.busy
-                                 else f"적용함 — {applied}개 바뀜" if applied else "바뀐 것이 없다")
+                self._pending_ids.append(command_id)
+                self._apply_pending_remote()
             else:
                 _kind, command_id, kind, wanted = event
                 try:
@@ -1477,18 +1477,22 @@ class RunWindow(ErpiaWindow):
                 self.remote.done(command_id, result)
         self._apply_pending_remote()                # 실행 중에 받아 둔 것 — 끝났으면 지금
 
-    def _apply_pending_remote(self) -> int:
-        """웹 설정을 이 PC 설정 파일에 저장한다. **실행 중이면 끝날 때까지 미룬다** — 도는 회차의 값을 중간에
-        바꾸지 않는다. 바뀐 키 수를 돌려준다 (미뤘으면 0)."""
+    def _apply_pending_remote(self) -> None:
+        """웹 설정을 이 PC 설정 파일에 저장하고 그 명령들에 결과를 알린다. **실행 중이면 끝날 때까지 미룬다** —
+        도는 회차의 값을 중간에 바꾸지 않는다."""
         if self._pending_remote is None or self.busy:
-            return 0
+            return
         values, self._pending_remote = self._pending_remote, None
+        ids, self._pending_ids = self._pending_ids, []
         if self.locked_modules is not None:
             values.pop("run_modules", None)         # 기능 고정 빌드 — 서버는 빌드 구성을 모른다
         changed = {key: value for key, value in values.items()
                    if remote.normalize(key, getattr(SETTINGS, key, None)) != value}
+        if self.remote is not None:
+            for command_id in ids:
+                self.remote.done(command_id, f"적용함 — {len(changed)}개 바뀜" if changed else "바뀐 것이 없다")
         if not changed:
-            return 0
+            return
         log.info("웹에서 바꾼 설정을 받았다 — %s", ", ".join(sorted(changed)))
         try:
             save_local(**changed)
@@ -1498,7 +1502,6 @@ class RunWindow(ErpiaWindow):
                 setattr(SETTINGS, key, value)
         self._show_settings(changed)
         self.status_var.set("웹에서 바꾼 설정을 받았습니다.")
-        return len(changed)
 
     def _show_settings(self, changed: dict) -> None:
         """바뀐 설정을 화면 칸에 옮긴다. 칸을 바꿔도 다시 저장되지 않는다."""

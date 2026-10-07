@@ -44,7 +44,7 @@
 | ERPia 업데이트·UAC | `probe_updater` 18 |
 | 빌드 프로그램·고정값 (`gui/build_app.py`, `LOCKED_KEYS`) · `.bat` | `probe_build` 54 |
 | 서버 보고 (`orchestrator/telemetry.py`) | `probe_telemetry` 70 — **필수** |
-| 원격 설정·명령 (`orchestrator/remote.py`, `run_app` 원격 부분) · 설정 파일 읽기·저장 | `probe_remote` 56 — **필수** |
+| 원격 설정·명령 (`orchestrator/remote.py`, `run_app` 원격 부분) · 설정 파일 읽기·저장 | `probe_remote` 57 — **필수** |
 | 웹 (`web/`) | `probe_web` 70 · `probe_web_shot` 23 (찍어서 본다) — **필수** |
 | LLM 워커 (`llm/`) | `probe_llm` 42 — **필수** (속도·답은 `python llm\worker.py --bench`) |
 | 켜기 (`utils/autostart.py`·`utils/instance.py`·`utils/crashlog.py`·`utils/selfcheck.py`·`main_run.py`·`collect/pw_driver.py`·`build_run.spec`) | `probe_startup` 39 — **필수** (빌드 뒤 `--exe --browser`) |

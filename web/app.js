@@ -561,7 +561,8 @@ async function loadDevices(body) {
 // ---------------------------------------------------------------- PC 한 대 — 제어·설정 (09-28)
 // 서버는 PC 를 부르지 않는다. 여기서 넣은 명령·설정은 PC 가 30초마다 가져간다 (server/schema.sql 7절).
 function canControl(accId) {
-  return myMembers.some(m => m.role === "admin" || (m.role === "owner" && m.account_id === accId));
+  // 중지된 업체의 owner 는 제어 못 한다 (서버 can_control 과 같게, 10-07) — 단추를 눌러 'forbidden' 을 보지 않게
+  return myMembers.some(m => m.role === "admin" || (m.role === "owner" && m.account_id === accId && !accountSuspended[accId]));
 }
 function checkbox(label, on, disabled) {
   const box = h("input", { type: "checkbox" });
@@ -816,8 +817,10 @@ function settingsForm(deviceId, snap, editable) {
   const save = h("button", { class: "primary", text: "저장", onclick: async () => {
     const values = read();
     if (typeof values === "string") { note.textContent = values; return; }
-    // 바꾼 것만 보낸다 — 그 사이 PC 에서 고친 다른 값을 덮지 않게
-    const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+    // 바꾼 것만 보낸다 — 그 사이 PC 에서 고친 다른 값을 덮지 않게. 빈 값은 꼴이 달라도 같다
+    // (PC 는 "" 를 보내고 서버가 안 받을 목록은 통째로 뺀다 — 웹 칸은 null·[] 이다. 다르게 보면 PC 목록을 [] 로 지운다)
+    const blank = v => v == null || v === "" || (Array.isArray(v) && !v.length);
+    const same = (a, b) => (blank(a) && blank(b)) || JSON.stringify(a) === JSON.stringify(b);
     const changed = Object.fromEntries(Object.entries(values).filter(([k, v]) => !same(v, s[k])));
     if (!Object.keys(changed).length) { note.textContent = "바뀐 것이 없습니다."; return; }
     save.disabled = true; note.textContent = "보내는 중...";

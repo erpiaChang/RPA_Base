@@ -40,7 +40,7 @@ from utils.logger import get_logger
 
 log = get_logger(__name__)
 
-# 예약 [일시정지] 상태 (10-01). 설정이 아니라 런타임 상태라 굽지 않는다 — remote_state.json 과 같은 부류.
+# 예약 [일시정지] 상태 (10-01). 설정이 아니라 런타임 상태라 굽지 않는다.
 # 경로는 부를 때 읽는다 — 확인 도구가 임시 폴더로 돌린다
 STATE_PATH = LOG_DIR / "autorun_state.json"
 

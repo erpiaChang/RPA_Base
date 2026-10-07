@@ -600,8 +600,10 @@ begin
     select id, 'lost', account_id, device_id from lost
     on conflict do nothing;
     get diagnostics v_n = row_count;
-    -- 설정 값은 서버에 남기지 않는다 (7절, 10-07) — 안 읽힌 PC 의 답·안 가져간 웹 값. 첫 실행에 표가 없어도 깨지지 않게
-    if to_regclass('public.commands') is not null then
+    -- 설정 값은 서버에 남기지 않는다 (7절, 10-07) — 안 읽힌 PC 의 답·안 가져간 웹 값. 7절 전(열이 없음)에도 깨지지 않게
+    -- — 깨지면 이 5분 잡의 끊김 판정·알림까지 멈춘다
+    if exists (select 1 from information_schema.columns
+               where table_schema = 'public' and table_name = 'commands' and column_name = 'payload') then
         update public.commands set payload = null
         where payload is not null and (done_at < now() - interval '2 minutes' or expires_at < now());
     end if;
@@ -856,7 +858,9 @@ declare
     v_val jsonb;
     v_ok  boolean;
 begin
-    if s is null or jsonb_typeof(s) <> 'object' or pg_column_size(s) > 8192 then
+    -- 15KB — 키마다 상한을 다 채운 값(보류 코드 200×50자 등)도 들어간다. PC 의 답이 통째로 버려지지 않게 (10-07 검토).
+    -- commands.payload check(16KB) 보다 작아야 한다 — 답은 이것 + 고정 기능
+    if s is null or jsonb_typeof(s) <> 'object' or pg_column_size(s) > 15360 then
         raise exception 'bad request' using errcode = 'PT400';
     end if;
     for v_key, v_val in select * from jsonb_each(s) loop
@@ -971,7 +975,8 @@ begin
         return v_cmd.payload;
     end if;
     if v_cmd.done_at is not null then
-        return jsonb_build_object('error', coalesce(v_cmd.result, ''));
+        -- '보냄' 인데 값이 없다 = 답이 왔으나 읽기 전에 정리됐다 (mark_lost). 그 밖에는 PC·서버가 남긴 사유
+        return jsonb_build_object('error', case when v_cmd.result = '보냄' then 'expired' else coalesce(v_cmd.result, '') end);
     end if;
     if v_cmd.expires_at <= now() then
         return jsonb_build_object('error', 'expired');
