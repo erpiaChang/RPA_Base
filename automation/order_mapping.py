@@ -126,6 +126,8 @@ MARKET_COLUMN = "마켓명"            # 수집로그 그리드 — 실패한 �
 COLLECTED_COLUMN = "수집여부"        # 수집로그 그리드의 체크박스 컬럼
 PROGRESS_LOG_INTERVAL = 60.0        # 수집 대기 중 진행 상황 로그 간격(초)
 POPUP_CHECK_INTERVAL = 10.0         # 수집 대기 중 ERPia 알림을 보는 간격(초, 10-07)
+READ_FAIL_LIMIT = 5                 # 수집 대기 중 매출처리 버튼을 연달아 못 읽으면 화면이 없는 것으로 본다 (10-07)
+SCREEN_GONE = "screen-gone"         # 그때 대기 조건이 돌려주는 표지
 # 수집로그 상태 중 **사람이 볼 필요가 있는 것**. 이름이 확정되지 않아 넓게 잡는다.
 #
 # ★ 이름이 `실패` 라고 **결함이라는 뜻이 아니다.** 아래 "수집 상태의 실제 의미" 참고.
@@ -1607,11 +1609,14 @@ def _strict_enabled(screen, holder: dict):
     실패하면 단추를 다시 찾고 예외를 올린다 — `wait_for` 가 '아직' 으로 보고 다시 본다."""
     def read() -> bool:
         try:
-            return bool(holder["button"].is_enabled())
+            value = bool(holder["button"].is_enabled())
         except Exception as exc:        # noqa: BLE001 — 요소가 사라짐(COMError 등). 다시 찾고 올린다
-            log.debug("매출처리 버튼 상태를 읽지 못했다 — 다시 찾는다: %s", exc)
+            holder["fails"] = holder.get("fails", 0) + 1
+            log.debug("매출처리 버튼 상태를 읽지 못했다(연속 %d번) — 다시 찾는다: %s", holder["fails"], exc)
             holder["button"] = _sales_button(screen)
             raise
+        holder["fails"] = 0
+        return value
     return read
 
 
@@ -1651,7 +1656,8 @@ def wait_collect_done(screen, timeout: float | None = None) -> None:
     행이 UIA에 없고, 사이트마다 끝나는 순서가 달라 마지막 행만 봐서도 안 된다.
     """
     timeout = SETTINGS.timeouts.collect if timeout is None else timeout
-    enabled = _strict_enabled(screen, {"button": _sales_button(screen)})
+    holder = {"button": _sales_button(screen), "fails": 0}
+    enabled = _strict_enabled(screen, holder)
 
     try:
         idle = _enabled_stable(enabled)
@@ -1688,10 +1694,15 @@ def wait_collect_done(screen, timeout: float | None = None) -> None:
             _close_popups(screen, watch)
         except Exception as exc:        # noqa: BLE001 — 알림을 못 봐도 완료 판정은 한다
             log.debug("수집 대기 중 알림을 보지 못했다: %s", exc)
-        return _enabled_stable(enabled)
+        try:
+            return _enabled_stable(enabled)
+        except Exception:               # noqa: BLE001 — 한두 번은 '아직'(wait_for 가 다시 본다). 계속이면 화면이 없다
+            if holder["fails"] >= READ_FAIL_LIMIT:
+                return SCREEN_GONE
+            raise
 
     try:
-        wait_for(done, f"{SALES_BUTTON_TITLE} 버튼 활성(수집 완료)", timeout=timeout)
+        result = wait_for(done, f"{SALES_BUTTON_TITLE} 버튼 활성(수집 완료)", timeout=timeout)
     except WaitTimeout as exc:
         checked, unchecked, unknown = collect_checks(screen)
         raise ScreenError(
@@ -1699,6 +1710,10 @@ def wait_collect_done(screen, timeout: float | None = None) -> None:
             f"  수집여부 체크 {checked}, 미체크 {unchecked}, 판정불가 {unknown}\n"
             f"  진행 상황: {_collect_progress(screen)}"
         ) from exc
+    if result == SCREEN_GONE:
+        # 예전에는 읽기 실패를 '활성'으로 봐 곧바로 다음 단계에서 실패했다 — 4시간을 기다리지 않게 여기서 멈춘다 (10-07 검토)
+        raise ScreenError(f"주문수집을 기다리는 중 매출처리 버튼을 {READ_FAIL_LIMIT}번 연달아 읽지 못했다 — "
+                          "ERPia 가 꺼졌거나 주문매핑 화면이 닫혔다.")
 
     checked, unchecked, unknown = collect_checks(screen)
     log.info(

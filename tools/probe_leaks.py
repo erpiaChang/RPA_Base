@@ -193,7 +193,7 @@ def collect() -> tuple[dict[str, str], list[str], bool]:
     for path in (p for pattern in SETTINGS_FILES for p in sorted(ROOT.glob(pattern))):
         rel = path.relative_to(ROOT).as_posix()
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8-sig"))     # 앱처럼 BOM 도 읽는다 (10-07)
         except (OSError, ValueError):
             warnings.append(f"{rel} 를 읽지 못했다 (JSON·인코딩) — 그 설정 값은 못 봤다")
             blind = True

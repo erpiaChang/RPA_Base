@@ -55,7 +55,7 @@ FORBIDDEN = ("pull", "push", "install", "uninstall", "root", "reboot",
 CMD_TIMEOUT = 20                 # adb 응답 상한(초)
 CONNECT_TIMEOUT = 60             # pair/connect 는 더 오래 걸린다(실측 2026-09-08)
 SMS_POLL = 2.0                   # 문자 도착 확인 간격(초)
-CODE_RE = re.compile(r"\b(\d{4,8})\b")
+CODE_RE = re.compile(r"(?<![\w-])(\d{4,8})(?![\w-])")   # `phonelink.CODE_RE` 와 같다 — 하이픈 붙은 번호·날짜는 뺀다 (10-07)
 # 발신번호 비교용. 표기 차이를 흡수하려고 숫자만 남긴다. 부분 일치는 하지 않는다.
 DIGITS_RE = re.compile(r"\D+")
 # ★ 문자 본문은 **여러 줄**이다. adb 출력은 한 행이 한 줄이 아니므로 줄 단위로

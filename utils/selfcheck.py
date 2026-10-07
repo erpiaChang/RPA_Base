@@ -28,12 +28,22 @@ def _settings() -> str:
     values = settings.SETTINGS
     ids = set(values.run_modules or []) if values.run_modules_locked else set(modules.IDS)
     required = modules.baked_required(ids)
-    # 비밀번호를 못 풀면 빈 값이 된다 (`settings._load`) — 그래서 빈 값을 본다
     blank = [key for key in required if getattr(values, key, None) in (None, "", [], {})]
     if blank:
         raise RuntimeError("구운 값이 비었다(빠졌거나 풀지 못함): " + ", ".join(blank))
     secret.seed()
-    return f"필수 {len(required)}개 채워짐"
+    # 구운 비밀번호(`baked:`)를 실제로 풀어 본다 — 씨앗이 안 맞으면 켤 때 그 값이 조용히 빈 값이 된다
+    wrapped = 0
+    if settings.BAKED_SETTINGS_PATH.is_file():
+        for key, value in settings.read_json_file(settings.BAKED_SETTINGS_PATH).items():
+            for item in (value.values() if isinstance(value, dict) else [value]):
+                if isinstance(item, str) and item.startswith(secret.BAKED_PREFIX):
+                    try:
+                        secret.unwrap(item)
+                    except Exception as exc:        # noqa: BLE001 — 어느 값인지 남긴다 (값은 남기지 않는다)
+                        raise RuntimeError(f"구운 비밀번호를 풀지 못했다: {key} ({type(exc).__name__})") from exc
+                    wrapped += 1
+    return f"필수 {len(required)}개 채워짐, 구운 비밀번호 {wrapped}개 풀림"
 
 
 def _modules() -> str:

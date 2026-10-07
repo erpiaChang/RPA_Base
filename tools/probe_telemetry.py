@@ -611,8 +611,9 @@ def check_cert() -> list[bool]:
         did = telemetry._warm_roots("https://x.example/rest/v1/rpc/ingest", run=fake_run)
         again = telemetry._warm_roots("https://x.example/", run=fake_run)
         args, kw = calls[0] if calls else (((),), {})
-        out.append(check("PowerShell 은 창 없이·시간 상한·주소는 환경변수로, 프로세스당 1번",
+        out.append(check("PowerShell(System32 절대 경로)은 창 없이·시간 상한·주소는 환경변수로, 프로세스당 1번",
                          did and not again and len(calls) == 1
+                         and args[0][0].lower().endswith("\\system32\\windowspowershell\\v1.0\\powershell.exe")
                          and kw.get("creationflags") == subprocess.CREATE_NO_WINDOW and kw.get("timeout")
                          and kw.get("stdin") == subprocess.DEVNULL and "x.example" not in " ".join(args[0])
                          and kw.get("env", {}).get("RPA_WARM_URL") == "https://x.example/"))

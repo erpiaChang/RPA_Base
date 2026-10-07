@@ -42,10 +42,10 @@ def build(on_line=print) -> Path:
     except SystemExit as exc:          # bake 는 빠진 값을 SystemExit 로 알린다
         raise BuildError(str(exc)) from exc
     on_line(f"  구운 파일: {baked}")
-    version = make_version()
-    (BAKED_DIR / VERSION_FILE).write_text(version, encoding="utf-8")
-    on_line(f"  판: {version}")
-    try:
+    try:                                # 여기서부터 실패해도 아래 finally 가 구운 설정(비밀번호)을 지운다
+        version = make_version()
+        (BAKED_DIR / VERSION_FILE).write_text(version, encoding="utf-8")
+        on_line(f"  판: {version}")
         _ensure_pyinstaller(python, on_line)
         # 지난 산출물을 지운다. 남겨 두면 옛 코드·exe 옆 설정(계정)이 섞일 수 있다.
         for folder in (WORK, DIST):
@@ -85,7 +85,7 @@ def selfcheck(exe: Path, on_line, run=subprocess.run) -> dict:
     창·한 벌 뮤텍스·서버 확인 앞에서 끝나므로 빌드를 이 PC 에 묶지 않는다. 실패하면 `BuildError`."""
     on_line("[점검] 만든 exe 를 임시 사본으로 켜 본다 (창·서버 확인 없이)")
     shutil.rmtree(SELFCHECK_DIR, ignore_errors=True)
-    SELFCHECK_DIR.mkdir(parents=True)
+    SELFCHECK_DIR.mkdir(parents=True, exist_ok=True)     # 지난 사본이 잠겨 못 지웠어도 덮어쓴다
     copy, result_file = SELFCHECK_DIR / exe.name, SELFCHECK_DIR / "selfcheck.json"
     shutil.copy2(exe, copy)
     try:

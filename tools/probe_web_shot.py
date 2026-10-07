@@ -268,6 +268,10 @@ def main() -> int:
                              and page.evaluate("window.__UPDATED") is None, got))
             got = submit("old-pass-1", "new-pass-22", "new-pass-23")
             out.append(check("다시 입력이 다르면 바꾸지 않는다", "다릅니다" in got, got))
+            long_korean = "가" * 25              # 25글자 = 75바이트 > 서버 상한 72바이트
+            got = submit("old-pass-1", long_korean, long_korean)
+            out.append(check("한글이 많아 서버 상한(바이트)을 넘으면 미리 막는다", "너무 깁니다" in got
+                             and page.evaluate("window.__UPDATED") is None, got))
             got = submit("wrong-pass", "new-pass-22", "new-pass-22")
             out.append(check("★ 현재 비밀번호가 틀리면 바꾸지 않는다", "맞지 않습니다" in got
                              and page.evaluate("window.__UPDATED") is None, got))

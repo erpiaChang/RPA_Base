@@ -134,6 +134,8 @@ curl -X POST "https://<ref>.supabase.co/rest/v1/rpc/ingest" ^
 `select public.suspend_account('<업체 id>');` — 그 업체의 모든 빌드가 다음 보고·poll 에서 401 이라 실행 창이 잠기고, 그 업체 owner 의
 웹 [실행]·설정 저장은 403. 읽기·자료·빌드는 그대로라 `select public.resume_account('<업체 id>');` 로 되돌린다. SQL 로만 부른다
 (관리자 화면 없음). 중지 중 끊긴 실행은 10분 뒤 `lost` 로 바뀌고 알림 메일이 갈 수 있다.
+★ **재개 뒤에는 그 업체의 각 PC 에서 RPA 를 한 번 껐다 켜야 한다** — 401 을 받은 실행 창은 폐기와 같이 보고 다시 묻지 않는다
+(`gui/run_app.py` 서버 확인 BLOCKED·`orchestrator/remote.py` poll 401). 끄지 않으면 창은 떠 있는데 예약이 돌지 않는다.
 
 ## 지우는 것
 

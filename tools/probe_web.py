@@ -226,7 +226,8 @@ def main() -> int:
     out.append(check("[비밀번호 변경] 단추는 숨긴 채 시작하고 로그인하면 보인다, 화면은 탭 분기보다 앞",
                      '<button id="pwBtn" class="hidden">' in html and 'getElementById("pwBtn").classList.toggle' in app
                      and 0 <= app.find('page === "account"') < app.find('page === "device"')))
-    out.append(check("새 비밀번호 길이 8~72 (72 = 인증 서버 상한)", "PW_MIN = 8, PW_MAX = 72" in app))
+    out.append(check("새 비밀번호 길이 8~72 — 상한은 서버처럼 바이트로 센다 (한글 3바이트)",
+                     "PW_MIN = 8, PW_MAX = 72" in app and "new TextEncoder().encode(nw).length > PW_MAX" in app))
     # wrangler 배포 (09-28): 이름이 주소다. README·설정 파일은 올리지 않는다
     wrangler = (WEB / "wrangler.jsonc").read_text(encoding="utf-8")
     out.append(check("wrangler.jsonc — 이름 rpa-dashboard, 올리는 폴더 build/web (자리표시를 채운 것)",

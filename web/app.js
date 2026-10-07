@@ -165,7 +165,8 @@ function renderLogin(msg) {
 function passwordProblem(cur, nw, nw2) {
   if (!cur) return "현재 비밀번호를 넣으세요.";
   if (nw.length < PW_MIN) return `새 비밀번호는 ${PW_MIN}자 이상이어야 합니다.`;
-  if (nw.length > PW_MAX) return `새 비밀번호는 ${PW_MAX}자 이하여야 합니다.`;
+  // 서버 상한은 바이트 — 한글은 한 글자가 3바이트라 글자 수로 세면 통과하고 서버가 거절한다 (10-07 검토)
+  if (new TextEncoder().encode(nw).length > PW_MAX) return "새 비밀번호가 너무 깁니다. 영문·숫자로는 72자까지입니다.";
   if (nw !== nw2) return "다시 입력한 비밀번호가 다릅니다.";
   if (nw === cur) return "지금 비밀번호와 같습니다.";
   return "";

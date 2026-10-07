@@ -27,6 +27,7 @@ r"""[조사 도구 - 읽기 전용] **실패했을 때 제대로 실패하는지
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -764,6 +765,17 @@ def _check_collect_wait() -> list[bool]:
         except om.ScreenError:
             timed_out = True
         out.append(check("끝나지 않으면 상한에서 멈춘다 (무한 대기 없음)", timed_out))
+
+        om._sales_button = lambda screen: _FakeButton([lost])        # ERPia 가 꺼졌다 — 다시 찾아도 못 읽는다
+        started = time.monotonic()
+        try:
+            om.wait_collect_done(_FakeScreen(), timeout=30)
+            error = ""
+        except om.ScreenError as exc:
+            error = str(exc)
+        spent = time.monotonic() - started
+        out.append(check("★ 버튼을 계속 못 읽으면(ERPia 꺼짐) 상한을 기다리지 않고 곧 멈춘다 (10-07 검토)",
+                         "연달아 읽지 못했다" in error and spent < 5, f"{spent:.1f}초 / {error[:40]}"))
     finally:
         (om._sales_button, om.dialogs.dismiss_message_box, winprobe.top_windows, om.POPUP_CHECK_INTERVAL,
          SETTINGS.timeouts.collect_settle, SETTINGS.timeouts.poll_interval, om.collect_checks,

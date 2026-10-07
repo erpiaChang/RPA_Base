@@ -156,15 +156,18 @@ def _warm_roots(url: str, *, run=subprocess.run) -> bool:
             return False
         _warmed = True
     parts = parse.urlsplit(url)
-    if parts.scheme != "https" or not parts.netloc:
+    system_root = os.environ.get("SystemRoot")
+    if parts.scheme != "https" or not parts.netloc or not system_root:
         return False
+    # 이름만 주면 exe 폴더·작업 폴더를 먼저 찾는다 — System32 의 것을 절대 경로로 (10-07 검토)
+    powershell = Path(system_root) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
     # 3072 = TLS 1.2 (옛 Windows 10 의 PowerShell 5.1 기본은 TLS 1.0). 주소는 글에 넣지 않고 환경변수로 넘긴다
     script = ("[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072; "
               f"try {{ Invoke-WebRequest -Uri $env:RPA_WARM_URL -UseBasicParsing -TimeoutSec {WARM_TIMEOUT} "
               "| Out-Null } catch { }")
     log.info("서버 인증서 오류 — Windows 가 루트 인증서를 받게 한 번 접속한다")
     try:
-        run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+        run([str(powershell), "-NoProfile", "-NonInteractive", "-Command", script],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             timeout=WARM_TIMEOUT + 10, creationflags=subprocess.CREATE_NO_WINDOW,
             env=dict(os.environ, RPA_WARM_URL=f"{parts.scheme}://{parts.netloc}/"))

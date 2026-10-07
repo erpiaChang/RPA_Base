@@ -763,7 +763,7 @@ ERPia 창이 앞에 있어 가끔 성공해서 문제가 가려졌다.
 | 그때 보인 것 | 값 |
 | --- | --- |
 | 탭(읽지 않은 수까지 이름에 있다) | `TabItem auto_id="MessagingNodeAutomationId" name='메시지(Ctrl+1). 읽지 않은 항목 9개'` |
-| 인증번호 고르기 (10-07) | 숫자 4~8자리. 앞뒤에 숫자·영문·`-` 가 붙으면 전화번호·날짜라 뺀다. 한글 바로 옆 숫자는 후보다. 후보가 여럿이면 멈춘다 (`phonelink.CODE_RE`) |
+| 인증번호 고르기 (10-07) | 숫자 4~8자리. 앞뒤에 글자(한글·영문·숫자)나 `-` 가 붙으면 뺀다 — 하이픈 번호·날짜와 '2026년'·'15000원' 이 후보가 되지 않게 (예전 `\b` 에 `-` 만 더함). 후보가 여럿이면 멈춘다 (`phonelink.CODE_RE` = `sms.CODE_RE`) |
 | [앱] 탭이 띄운 안내판 | `GroupBox auto_id="ErrorTakeoverPanel"` + `Text auto_id="TitleTextBlock" '즐겨 찾는 모바일 앱을 손쉽게 액세스…'` |
 
 - **탭은 클릭하지 않고 `iface_selection_item.Select()` 로 고른다.** 창이 뒤에 있거나
