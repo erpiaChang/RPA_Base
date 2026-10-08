@@ -24,7 +24,7 @@ RPA 흐름 3종(수집 / ERPia / 통합)이 구현·검증됐고, 배포는 실�
 
 | 무엇 | 상태 |
 | --- | --- |
-| 스키마 `server/schema.sql` | 최신 적용은 10-02 (알림 확장·`sales_mode` — `ingest`·`mark_lost`·`send_alerts`·`clean_settings`, md5 대조함). **파일만 바꾼 것 하나**: `refresh_usage` 본문 주석의 사이트 이름(10-02 git 정리) — 서버 본문과 md5 가 다르다, 다음 적용 때 같이 |
+| 스키마 `server/schema.sql` | 최신 적용은 **10-08** — 10-07(업체 중지·설정은 PC 에만, `device_settings` 표 삭제) + 10-08(업체 전용 빌드) 묶음. 적용한 16함수 md5 가 파일과 같다 (`tools.probe_schema_md5`). RLS 시험 64/64 (되돌림). **주석만 다른 넷**: `ask_question`·`llm_take`·`llm_write`·`refresh_usage` — 다음 적용 때 같이 |
 | 보고기 `orchestrator/telemetry.py` | 실행·단계·사용자 로그·확인할 것·심박. 실패분은 `logs/outbox.jsonl` |
 | 등록 = **빌드 ID + PC 바인딩** (09-28) | 빌드 프로그램이 빌드할 때 `register_build` 로 받아 굽고, 처음 켜는 PC 에 묶인다. 같은 PC 에 여러 벌은 된다(`MachineGuid` 하나), 다른 PC 로 복사하면 401 → 실행 잠김, PC 교체는 다시 빌드. `LOCKED_KEYS` 는 exe 옆 설정이 못 덮는다. 옛 `enroll`·등록 토큰·기기 키는 없다 |
 | 웹 대시보드 | https://rpa-dashboard.rpa-dashboard.workers.dev — 탭 넷(요약·사용량·PC·실행 기록) + [사용법 질문] 옆 패널, 원격 설정·[실행]·[RPA 종료]·[일시정지]/[계속하기]. 배포 `deploy_web.bat` |
@@ -50,7 +50,7 @@ RPA 흐름 3종(수집 / ERPia / 통합)이 구현·검증됐고, 배포는 실�
 | --- | --- |
 | 틀·끼움 자리·실행 창 업체 칸·빌드 프로그램 업체 고르기·spec·자가 점검 | 코드·확인 도구 (`probe_customer` 47, 업체 probe 33, 회귀 18종 통과) |
 | 업체 화면 (SAP 연동관리·WMS 이관관리) | **시험 실행으로 실화면 통과** (10-08 시험 계정 — 메뉴 검색·대시보드 단추·그리드 읽기만, 두 화면 10단계, 116초). 매출전표는 사용자 10-08 순서: 전체 체크 → [지정▼] '선택 항목만' → 다시 조회 → 검토 빈 줄만 체크 → 화살표. 단계 칸이 한 번 다른 단계로 읽혀(원인 모름, 다시는 안 남) 누르기 직전마다 단계를 다시 본다. **실행 모드(체크·[지정▼]·화살표·팝업)는 실화면 미검증** — 가짜 그리드로만 |
-| 서버 (`devices.customer`·`register_build` 세 인자·`modules_ok`·`cx_value_ok`·`described_ok`) · 웹 (업체 칸·기능 이름) | **실서버 미적용** — 10-07 SQL 다음에 적용, 그 뒤 웹 배포 (사용자 승인 10-08 "8. 승인" — SQL 은 보여 주고 적용) |
+| 서버 (`devices.customer`·`register_build` 세 인자·`modules_ok`·`cx_value_ok`·`described_ok`) · 웹 (업체 칸·기능 이름) | **실서버 적용·웹 배포 (10-08)** — md5 대조·RLS 64/64. 업체 빌드로 웹에서 업체 칸이 보이는지는 그 빌드를 켜 봐야 안다 |
 
 ### 2-0. 10-07 — 다른 팀 RPA 의 장점 적용: 승인·결정 대기
 
@@ -63,9 +63,9 @@ RPA 흐름 3종(수집 / ERPia / 통합)이 구현·검증됐고, 배포는 실�
 | ★ **골라도 하단이 바뀌지 않는 상품** (10-08 데이터 많은 시험 업체) | 부족 상품 하나를 골랐는데 45초 동안 하단이 앞 상품의 화면(행 수·코드) 그대로였다. 그 상품 코드는 하단에 없어 흐름에서는 **'대상 없음' 으로 보류가 안 걸린다**. 같은 주문 묶음이라 정상인지, ERPia 가 재조회를 안 한 것인지 **사용자 확인 필요** (상품코드는 git 밖 기록에만) |
 | **[조회] 직후 '0행으로 안정' 판정** (10-07 1차 시험에서 드러남) | **고쳤다** — 로딩 표시(그리드를 덮는 새 자식 창)가 사라질 때까지 기다리고, 0행은 덮개 없이·한가하게 3초 이어질 때만 믿는다 (`_wait_rows(loading=)`). 예전에는 상단을 훑은 행 0개로 보류 없이, [일반] 은 '저장할 행 없음' 으로 끝날 수 있었다(조용한 누락). 실측(두 업체): 새 판정이 덮개가 사라진 1.0~1.25초 뒤 끝났고 2초 뒤에도 같았다. 진짜 0행인 날은 [조회]마다 3초가 더 든다. **[일반] 탭 [조회]·저장 뒤의 덮개는 실측 전** |
 | [일반] 이 한 화면을 넘을 때 저장 뒤 '넘긴 주문 수' (10-08 검토로 찾은 옛 결함) | **고쳤다** — 보이는 행 수는 전후가 같을 수 있어 '0건(정확)' 으로 나갔다. 이제 화면 밖 행이 있으면 저장 뒤 전표 수를 다시 센다. 실기 전 (가짜 그리드로만) |
-| 업체 단위 중지 — `server/schema.sql` (`suspended_at`·`bind_device`·`can_control`·`suspend_account`/`resume_account`) + **웹 관리자 [PC] 탭 단추** (10-07 사용자 요청) · 풀면 PC 가 10분 안에 다시 확인 | **실서버 미적용.** 10-07 사용자 승인("1,2, 모두 승인") 뒤 `apply_migration` 호출이 **승인 창에서 거절됐다** — 서버는 그대로. 다시 승인 받고 적용 → md5(prosrc) 대조 |
-| **설정은 PC 에만** (10-07 사용자 확정) — 서버 `device_settings` 표를 지우고, 웹은 열 때 PC 에 묻는다(`request_settings`·`take_settings`), 바꾼 값은 `settings` 명령으로 건네고 지운다. **`devices` 의 상태값(예약 켬/끔·일시정지·다음 예약·판 번호)은 남긴다** (사용자 확정 10-07) | **실서버 미적용** (위와 한 번에). 순서: SQL → 웹 배포(SQL 전에 올리면 웹이 설정을 못 받는다) |
-| RLS 거부 시험 — `server/tests/rls_check.sql` | 실서버 1회 실행 (끝에서 전부 되돌림, APPROVED-SQL). 업체 중지 적용 뒤면 2단계도 돈다. 설정 주고받기 한 바퀴도 본다 |
+| 업체 단위 중지 — `server/schema.sql` (`suspended_at`·`bind_device`·`can_control`·`suspend_account`/`resume_account`) + **웹 관리자 [PC] 탭 단추** (10-07 사용자 요청) · 풀면 PC 가 10분 안에 다시 확인 | **실서버 적용 (10-08)**. 10-07 의 거절은 drop 이 든 SQL 의 MCP 확인 창을 VS Code 확장이 못 띄운 것 (4절 서버 함정) |
+| **설정은 PC 에만** (10-07 사용자 확정) — 서버 `device_settings` 표를 지우고, 웹은 열 때 PC 에 묻는다(`request_settings`·`take_settings`), 바꾼 값은 `settings` 명령으로 건네고 지운다. **`devices` 의 상태값(예약 켬/끔·일시정지·다음 예약·판 번호)은 남긴다** (사용자 확정 10-07) | **실서버 적용·웹 배포 (10-08)**. 웹의 설정 보기가 실제 PC 에 닿는지는 10-07 이후 빌드를 켜 놓고 웹에서 열어 봐야 안다 |
+| RLS 거부 시험 — `server/tests/rls_check.sql` | **실서버 64/64 통과 (10-08, 되돌림 — 흔적 없음 확인)**. 업체 중지 2단계·설정 주고받기 포함 |
 | ~~웹 [비밀번호 변경] (`#/account`)~~ | **지웠다** (10-07 사용자 확정 — 비밀번호는 프로그램에서만). 웹 로그인 비밀번호는 관리자가 바꾼다 |
 | 빌드로만 볼 수 있는 것 | 다음 빌드에서: 빌드 직후 자가 점검(`--selfcheck`)이 실제로 도는지 · 판 번호가 웹 PC 표에 · 켜는 중 실패 때 알림 창이 PyInstaller 오류 창과 겹치지 않는지 · 관리자/일반 권한 두 벌 막기 |
 | 미검증 (실제 상황이 와야) | 갓 설치 Windows 의 인증서 채우기 · 자동수집 대기 중 ERPia 알림 · 휴대폰 연결 앱의 다른 판 탭 id · 실사이트의 사이트 화면 도우미 |
@@ -211,6 +211,7 @@ RPA 흐름 3종(수집 / ERPia / 통합)이 구현·검증됐고, 배포는 실�
 | **빌드가 `dist/run` 을 통째로 지운다.** 앞 exe 를 남기려면 빌드 전에 다른 폴더로 옮긴다 | `tools/build_run.py:44-47` |
 | **서버가 모르는 이벤트·설정 키는 요청째 400 이다.** 새 이벤트(`alert`)는 따로 한 건씩 보내 피해를 막았지만, 새 원격 키(`sales_mode`)는 SQL 을 먼저 적용해야 한다 — 순서: SQL → 웹 → 빌드 | `orchestrator/telemetry.py` `alert`, `server/schema.sql` `clean_settings` |
 | 웹 배포(wrangler@4)는 **Node 22** 가 필요하다. nvm 이 16 이면 바로 실패한다 (09-30) — `nvm use 22` | `deploy_web.bat` |
+| **`DROP`(·조건 없는 DELETE/UPDATE) 이 든 SQL 은 Supabase MCP 가 확인 창을 요청하는데 VS Code 확장은 못 띄워 `declined`** (10-07·10-08). Elicitation 훅 `sql_elicit.py` 가 `guard_sql` 이 남긴 1회용 표(메인 승인 SQL·같은 프로젝트·60초)로 수락한다. 표 없이 오면 거절 | `.claude/hooks/sql_elicit.py`, `probe_hooks` |
 | `execute_sql` 은 **읽기라도** 훅에 막힌다 — `-- APPROVED-SQL:` 이 필요하다. `list_tables`·`get_advisors` 는 그냥 통과 | `.claude/hooks/guard_sql.py` |
 | **개발 설정에 빌드 ID 가 들어가면 probe 가 실서버로 보고하고, 그 빌드를 개발 PC 에 묶는다** (09-23 사고 — 가짜 줄 4건). 실행 창을 띄우는 probe 는 `probe_guard.offline()` 안에서 돈다. 빌드 뒤 개발 설정의 `server_build_id` 는 비워 둔다 | `tools/probe_guard.py` |
 | `dist/run` 에 `settings.local.json` 을 미리 두면 **구운 값이 전부 빈 값으로 덮인다** | `docs/BUILD.md` |
