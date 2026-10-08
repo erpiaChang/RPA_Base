@@ -171,6 +171,15 @@ RULES = (
     ("automation.order_mapping.ScreenError", None, SCREEN),
     ("automation.logistics.ScreenError", None, SCREEN),
     ("automation.logistics_wait.ScreenError", None, SCREEN),
+    # 메뉴 검색으로 화면 열기 (10-08, `automation/menu.py`) — 메뉴가 없는 계정이면 담당자 일이다
+    ("automation.menu.MenuError", r"메뉴 검색 결과에",
+     "{where} 멈췄습니다 — 이 ERPia 계정의 메뉴에서 그 화면을 찾지 못했습니다.\n"
+     "ERPia에 그 메뉴가 있는지(권한 포함) 담당자에게 확인해 주세요."),
+    ("automation.menu.MenuError", None, SCREEN),
+    # 누른 뒤 팝업을 [예]/[확인] 으로 넘기다 멈춤 (10-08, `dialogs.confirm_all`) — 무엇이 처리됐는지 화면을 봐야 한다
+    ("utils.dialogs.DialogStuck", None,
+     "{where} 멈췄습니다 — ERPia 알림을 넘기지 못했거나 처리가 끝나지 않았습니다.\n"
+     "ERPia 화면에 떠 있는 알림을 확인하고, 어디까지 처리됐는지 그 화면에서 본 뒤 다시 실행하세요."),
     ("utils.ui.ControlNotFound", None, SCREEN),
     ("utils.ui.ControlDisabled", None, SCREEN),
     ("utils.dialogs.DialogNotFound", None, SCREEN),

@@ -98,11 +98,13 @@ def _login(url: str, anon: str, email: str, password: str) -> str:
 
 
 def register(url: str, anon: str, email: str, password: str,
-             account_name: str, build_name: str, *, post=None, get=None, confirm_new=None) -> str:
+             account_name: str, build_name: str, *, post=None, get=None, confirm_new=None,
+             customer: str | None = None) -> str:
     """빌드를 등록하고 `bld_...` 를 돌려준다. 실패하면 `RegisterError`.
 
     ★ 서버에 없는 업체 이름이면 `confirm_new(이름, 비슷한 이름들)` 이 True 일 때만 새 업체가 된다 (10-07) —
       서버 `register_build` 는 이름이 한 글자라도 다르면 조용히 새 업체를 만든다. 콜백이 없으면 거절한다.
+    `customer` 는 업체 전용 빌드의 업체 id (10-08) — 서버 PC 행(`devices.customer`)에 남는다. 원본 빌드는 None.
     `post`·`get` 은 확인 도구가 가짜를 준다 — 실제 서버를 부르지 않고 시험할 수 있다.
     """
     global _post, _get                              # noqa: PLW0603 — 확인 도구가 갈아 끼운다
@@ -110,7 +112,8 @@ def register(url: str, anon: str, email: str, password: str,
         original = _post, _get
         _post, _get = post or _post, get or _get
         try:
-            return register(url, anon, email, password, account_name, build_name, confirm_new=confirm_new)
+            return register(url, anon, email, password, account_name, build_name, confirm_new=confirm_new,
+                            customer=customer)
         finally:
             _post, _get = original
 
@@ -129,7 +132,8 @@ def register(url: str, anon: str, email: str, password: str,
                             "기존 업체 이름과 똑같이 쓰거나, 새 업체면 확인 창에서 [예] 를 누르세요.")
     status, text = _post(url + RPC_PATH,
                          {"apikey": anon.strip(), "Authorization": f"Bearer {token}"},
-                         {"account_name": account, "build_name": build_name.strip()})
+                         {"account_name": account, "build_name": build_name.strip(),
+                          **({"customer": customer} if customer else {})})
     if status in (401, 403):
         raise RegisterError("이 계정은 빌드를 등록할 수 없습니다 (관리자 권한이 필요합니다).")
     if not 200 <= status < 300:

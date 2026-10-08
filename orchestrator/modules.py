@@ -15,7 +15,8 @@ r"""모듈 — 사람이 고르는 **기능 단위**이자 **과금 행위 단�
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from typing import Callable
 
 from orchestrator import steps, steps_collect, steps_erpia
 from orchestrator.steps import Step
@@ -26,6 +27,9 @@ class Module:
     id: str
     name: str
     erpia: bool         # ERPia 를 띄워야 하는가
+    # 업체 기능만 (10-08, `config/customer.py`) — 단계 표와 그 단계를 도는 함수 `run(target, hooks, dry_run) -> (결과, 요약 조각)`
+    steps: tuple[Step, ...] = ()
+    run: Callable | None = field(default=None, compare=False)
 
 
 MAIL = Module("mail", "메일 엑셀 받기", erpia=False)
@@ -33,8 +37,21 @@ ORDERS = Module("orders", "주문수집·매출처리", erpia=True)
 LOGI_WAIT = Module("logistics_wait", "물류대기", erpia=True)
 LOGI = Module("logistics", "물류관리", erpia=True)
 
+BASE = (MAIL, ORDERS, LOGI_WAIT, LOGI)
+
+
+def _with_customer(base: tuple[Module, ...]) -> tuple[Module, ...]:
+    """업체 빌드면 원본 기능 중 그 업체가 쓰는 것 + 업체 기능(뒤에 돈다). 업체가 없으면 원본 그대로."""
+    from config.settings import CUSTOMER
+    if CUSTOMER is None:
+        return base
+    kept = tuple(m for m in base if CUSTOMER.base is None or m.id in CUSTOMER.base)
+    extra = tuple(CUSTOMER.modules_factory()) if CUSTOMER.modules_factory else ()
+    return kept + extra
+
+
 # ★ 실행 순서. 고른 순서와 상관없이 이 순서로 돈다.
-ALL = (MAIL, ORDERS, LOGI_WAIT, LOGI)
+ALL = _with_customer(BASE)
 IDS = tuple(module.id for module in ALL)
 
 
@@ -99,6 +116,12 @@ def plan(chosen: list[Module], sources: list[str]) -> list[Step]:
         launch = []
     if LOGI.id in ids:
         out += _staged(LOGI, [*launch, steps_erpia.LOGI])
+        launch = []
+    for module in chosen:
+        if module.steps:                    # 업체 기능 — 원본 뒤에 그 순서로
+            out += _staged(module, [*launch, *module.steps] if module.erpia else list(module.steps))
+            if module.erpia:
+                launch = []
     return out
 
 
@@ -113,6 +136,7 @@ _OWNER = {
     **{item.id: ORDERS.id for item in steps_erpia.SOURCE_STEPS.values()},
     steps_erpia.LOGI_WAIT.id: LOGI_WAIT.id,
     steps_erpia.LOGI.id: LOGI.id,
+    **{item.id: module.id for module in ALL for item in module.steps},
 }
 
 

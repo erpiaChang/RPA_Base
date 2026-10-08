@@ -1,7 +1,28 @@
-# 업체 전용 RPA 구조 (기획)
+# 업체 전용 RPA 구조
 
-원본 RPA 하나에 업체마다 다른 규칙·동작을 붙이는 구조. 기획·검토 10-02.
-**아직 만들지 않았다 — 그 업체의 정확한 프로세스가 나오면 만든다** (사용자 확정 10-02).
+원본 RPA 하나에 업체마다 다른 규칙·동작을 붙이는 구조. 기획·검토 10-02, **10-08 에 만들었다** — 첫 업체의 전용 RPA 를
+다른 저장소에서 이 프로젝트로 옮겼다 (사용자 결정: 남의 저장소에 PR 하는 구조라 제약이 많다). 아래 2~4절은 기획 때의 설계이고,
+실제로 만든 것은 0절이다 — 둘이 다르면 0절이 맞다.
+
+## 0. 만든 것 (10-08)
+
+| 무엇 | 어디 |
+| --- | --- |
+| 틀 — `Field`(칸 정의)·`Profile`·`load`·`raw_id`·`available` | `config/customer.py` (git 안, 업체 이름 없음). 기획의 `customers/__init__.py` 대신 — 원본이 import 하는 것이라 업체 폴더가 없는 clone 에서도 돌아야 한다 |
+| 업체 패키지 | git 밖 `customers/<id>/__init__.py`(`PROFILE` — 가볍게, 설정 읽는 도중에 불린다) + 화면 코드 |
+| 업체 고르기 | 설정 `customer` — 빌드 프로그램 2절에서 고르고 **굽고 잠근다**(`LOCKED_KEYS`). 바꾸면 빌드 프로그램을 다시 켜야 그 업체 기능 목록이 보인다. 개발 폴더는 환경변수 `RPA_CUSTOMER` (빌드본은 무시) |
+| 칸 | `Profile.fields` → `DEFAULTS` 에 더함(`config/settings.py`) · 실행 창 [설정] 탭에 업체 이름 묶음(종류별로 그림, `gui/run_app._customer_section`) · 웹 — PC 가 설정 답에 칸 정의를 싣는다(`remote.described`) |
+| 기능 | `Profile.base`(원본 기능 중 쓰는 것) + `modules_factory()`(업체 기능 `Module(steps=, run=)`, id `cx_`). 원본 기능 뒤에 돈다 (`modules.plan`, `full_flow._full`) |
+| 영역마다 시험 실행 | `Profile.rehearse(area)` — `collect`·`sales`·`logistics_wait`·`logistics`·업체 기능 id. 참이면 그 영역만 누르지 않고 확인 (`full_flow.rehearsed`) |
+| 물류대기 보류 | `Profile.hold=False` → `logistics_wait.run(hold=False)` — 보류 없이 [일반] 저장만, [물류처리] 안 누름 |
+| 빌드 | `build_run.spec` — 구운 업체 패키지 하나만 넣고 다른 업체는 누출 검사 금지 목록. 자가 점검(`utils/selfcheck`)이 업체 패키지도 불러 본다 |
+| 서버 | `devices.customer`(register_build 가 넣음) · 기능 목록 `private.modules_ok`(원본 넷 + `cx_`) · 업체 칸 `cx_` 은 종류·크기만(`private.cx_value_ok` — 고르는 값은 PC 가 거른다) · 설정 답의 칸 정의·기능 이름(`private.described_ok`) — **실서버 미적용** |
+| 웹 | 업체 칸·기능 이름은 PC 가 보낸 것으로 그린다 (`app.js` 에 업체 이름 없음) · PC 표에 `전용 <id>` |
+| 공용 부품 (업체 이름 없음) | `automation/menu.py` 메뉴 검색으로 화면 열기 · `utils/dialogs.confirm_all` 팝업 모두 [예](없으면 [확인]) · `has_message_box` |
+| 확인 | `tools/probe_customer` (가짜 업체) · git 밖 `tools/local/probe_customer_<id>` |
+
+안 만든 것: 빌드 프로그램에서 업체 칸의 처음 값 넣기(칸의 기본값 = 안전한 쪽으로 굽힌다 — 바꾸려면 실행 창·웹) /
+업체 기능의 사용량 집계(`usage_daily` 는 원본 네 기능만 센다) / 5절 미정 1·2.
 업체별 요구·미팅 기록은 `docs/customers/<업체>.md` (그 업체 작업 때만 연다). **업체 전용 코드·문서는 전부 git 밖이다** — `customers/` · `docs/customers/` · 사이트 파일 `collect/sites/local/` · 그 시험 `tools/local/` · 조사 기록 `docs/local/` (`.gitignore`, 확정 7).
 
 ## 1. 확정 (사용자 10-02)

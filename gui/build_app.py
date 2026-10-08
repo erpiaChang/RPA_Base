@@ -25,7 +25,8 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from config.settings import DEFAULTS, LOCAL_SETTINGS_PATH, SETTINGS, save_local
+from config import customer
+from config.settings import CUSTOMER, DEFAULTS, LOCAL_SETTINGS_PATH, SETTINGS, save_local
 from gui.common import HELP_FONT_SIZE, apply_scaling, ui_scale
 from collect.browser import CHANNELS
 from orchestrator import modules
@@ -51,6 +52,8 @@ SECTIONS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
         ("login_password", "비밀번호", "secret"),
     )),
     ("2. ERPia 업무", (
+        # 업체 전용 빌드 (10-08, `docs/CUSTOMERS.md`) — 굽고 잠근다. 바꾸면 이 프로그램을 다시 켜야 그 업체의 기능이 보인다
+        ("customer", "업체 전용 (비우면 원본)", "choice:" + ",".join(customer.available())),
         ("run_modules", "실행할 기능", "modules"),
         ("run_modules_locked", "기능 선택", "lock"),
         ("collect_sources", "주문수집 방식", "sources"),
@@ -360,6 +363,11 @@ class BuildWindow:
             return
         from tools import bake_settings           # 개발 전용 — 늦게 불러 배포본에 흔적을 남기지 않는다
 
+        # 업체를 바꿨으면 이 창의 기능 목록·구울 칸은 옛 업체 것이다 — 다시 켜야 맞는다 (기능 목록은 켤 때 정해진다)
+        if (values.get("customer") or "") != (CUSTOMER.id if CUSTOMER else ""):
+            self._say("업체를 바꿨습니다. 저장했으니 빌드 프로그램을 닫고 다시 켠 뒤 빌드하세요 "
+                      "(실행할 기능 목록이 그 업체 것으로 바뀝니다).", error=True)
+            return
         # 서버에 등록하기 **전에** 막는다 — 등록부터 하면 쓰지 못할 빌드(PC 행)가 대시보드에 쌓인다 (10-02 검토)
         empty = bake_settings.missing(values)
         if empty:
@@ -401,7 +409,7 @@ class BuildWindow:
                 values.get("server_url") or "", values.get("server_anon_key") or "",
                 values.get("build_admin_email") or "", values.get("build_admin_password") or "",
                 values.get("build_account_name") or "", values.get("build_label") or "",
-                confirm_new=self._ask_new_account)
+                confirm_new=self._ask_new_account, customer=values.get("customer") or None)
         except register_build.RegisterError as exc:
             self._say(f"서버 등록 실패: {exc}", error=True)
             self._log(f"서버 등록 실패: {exc}\n")

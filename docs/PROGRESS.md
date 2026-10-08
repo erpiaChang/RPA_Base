@@ -77,12 +77,14 @@
 | `main_build.py` | [개발] 빌드 프로그램 진입점 (`build_tool.bat`) |
 | `config/settings.py` | 설정 읽기의 **단일 지점** + `Timeouts` + 비밀 키 풀기 (재시도 상한은 자리마다 상수) |
 | `config/fields_collect.py` / `fields_erpia.py` | 기능별 설정 항목 정의 |
+| `config/customer.py` | **업체 전용 빌드의 틀** (10-08, `docs/CUSTOMERS.md` 0절) — `Field`·`Profile`(칸·쓰는 원본 기능·업체 기능·영역별 시험 실행·물류대기 보류)·`load`. 업체 이름 없음. 업체 패키지는 git 밖 `customers/<id>/`. 설정 `customer`(굽고 잠금) 또는 개발 폴더의 `RPA_CUSTOMER` |
 | `automation/application.py` | 실행/연결. 흐름은 **늘 새 인스턴스**(`start_new_instance`), 같은 계정만 닫기(`close_others`). `connect` 는 **생성시각이 가장 최근인 인스턴스**(`test_flow --from`·조사 도구). `find_exe`·`is_erpia_exe` — 이 PC 의 ERPia 찾기. 파일 이름은 설정 `target_exe_name` (다른 exe 는 ERPia 로 보지 않는다, 09-29 / 이름을 설정으로 10-02). Program Files 아래 두 단계 → 등록 정보 → 바로가기. `logged_in_pids` — 같은 아이디로 로그인된 ERPia 를 읽기만 (예약 전 경고, 10-02) |
 | `automation/login.py` | 로그인 + 직후 팝업 분기. 동시 로그인이면 이 PC 의 앞 인스턴스를 닫고 한 번 더 |
 | `automation/sidebar.py` | 좌측 프로세스바 auto_id 3개 (주문수집·물류대기·물류처리) — 화면 모듈 셋이 같이 쓴다 (09-22) |
 | `automation/updater.py` | 업데이트 안내 창은 누르고, **UAC 동의 창은 탐지해 사람에게 알린다**(누를 수 없다). `alert` 로 서버에도 — 업체 담당자 메일 (10-02) |
 | `automation/order_mapping.py` | 화면 진입 / 주문수집(자동·엑셀) / 매출처리. **버튼 없는 사이트 행은 안 누른다**. `collect_counts_all` — 수집로그를 **끝까지** 내려 센다 (09-22). **매출처리 방식은 설정 `sales_mode`** (10-01) — `전체` [매출처리] 단추 → '일괄' [예] / `선택주문` `select_all_orders`·`open_selected_sales` |
 | `automation/logistics_wait.py` | 물류대기 전체. `menu_available()` — **메뉴가 없는 계정 판정** / `ensure_bottom_sorted()` — 하단 정렬 후 묶음 끝에서 스캔 중단 (09-17). **주문 수는 행이 아니라 전표로** (09-29) — 보류는 체크한 행의 `전표번호`, 저장은 [일반] 탭 전후 `count_general_slips` (전표번호가 오른쪽 밖이라 가로로 넘겨 읽는다). **10-07**: [조회] 완료 판정 — 로딩 표시(그리드를 덮는 새 자식 창)를 보고 0행은 조용함 3초 뒤에만 믿는다 (`Loading`·`_wait_rows(loading=)`) / **찾기(Ctrl+F)로 건너뛰기** — 정렬된 하단을 맨 위부터 3장 읽고도 그 코드가 없고 아래가 많이 남았을 때만. 맨 앞 창·하단 키보드 포커스 확인, 늦게 뜬 찾기 창도 닫기, 묶음 시작(윗행이 다른 코드) 확인, 못 하면 맨 위부터 다시 (`_skip_ahead`·`find_code`). [일반] 이 한 화면을 넘으면 저장 뒤 전표로 다시 센다 (10-08) |
+| `automation/menu.py` | **메뉴 검색으로 화면 열기** (10-08) — `sch_Menus` 에 메뉴명 → 걸러진 `acd_Nav` 트리 항목(자리가 멈추면) → 화면. 이미 열렸으면 그 탭. 키는 검색 칸에 포커스가 있을 때만. 화면이 맞는지는 부르는 쪽 `ready()` |
 | `automation/logistics.py` | 물류관리 전체. `select_mode()` 자동/수동, `press_finish()` 마지막 버튼. `count_slips` — 하단 `매출번호` 를 **끝까지** 읽어 중복 없이 = 올라간 주문 (09-29). `count_boxes` — **만든 전표 = 박스(송장) 수**, 저장 직전 상단 `배송업체` 가 찬 줄 (09-29 실기: 주문 2건 → 송장 31) |
 | `collect/webmail.py` | **메일 사이트 틀** (10-02) — `MailSite` 계약(로그인 한 번·목록·메일 열기·첨부 단추·목록으로) + `login`(재시도)·`collect`(대상 선별·받기·매니페스트). 사이트마다 다른 것은 사이트 파일에만 — 목록을 기간 안쪽이 끝날 때까지 넘기는 일도 사이트 파일(`list_rows_until`, 상한 `MAX_PAGES`=20) |
 | `collect/browser.py` | 시크릿 창 브라우저 (Playwright, `CHANNELS` msedge·chrome). 브라우저 없음은 `BrowserError` 로 사람 말 (10-07). **사이트 화면 도우미** (10-07, `docs/SITES.md` 4절) — `click_through`(가로막는 공지)·`hover_click`·`receive_download`/`save_download`(팝업 포함·엑셀 검사)·`DialogGuard`(기대 문구만 수락)·`RowWatch`(새 줄만). Playwright 는 함수 안에서만 부른다 (메일 없는 빌드) |
@@ -93,7 +95,7 @@
 | `collect/sms.py` | 인증 문자 읽기 (adb). 문자 조회만 허용 |
 | `collect/storage.py` / `manifest.py` | 날짜·차수 폴더 규칙 / `manifest.json`. 소비 표시는 **그 항목에** (`mark_consumed(item)` — 받기 실패 뒤 다시 받으면 같은 메일 키가 둘이다, 10-02) |
 | `utils/ui.py` | **모든 UI 조작의 단일 창구.** `reveal_cell()` 잘린 셀 보이게 / `grid_data_area()`. **건수 세기** (09-29) — `scan_column`·`distinct_count` 끝까지 내려 한 컬럼을 중복 없이(스크롤바 버튼만) / `reveal_column`·`columns_home` 가로로 가려진 컬럼 보이게·되돌리기 / `scroll_up_line` 스크롤바 '위로 선' 한 번 (10-07) |
-| `utils/dialogs.py` / `filedialog.py` | 팝업 / 파일 선택 창. `dismiss_message_box()` — ERPia 알림이 **[확인] 하나면 닫는다** (09-22). `post_close()` 창에 닫기만 보낸다 (찾기 창, 10-08) |
+| `utils/dialogs.py` / `filedialog.py` | 팝업 / 파일 선택 창. `dismiss_message_box()` — ERPia 알림이 **[확인] 하나면 닫는다** (09-22). `post_close()` 창에 닫기만 보낸다 (찾기 창, 10-08). `confirm_all()` 누른 뒤 팝업을 **[예](없으면 [확인]) 로 모두** 넘기고 조용해질 때까지 (업체 결정 10-08), `has_message_box()` |
 | `utils/wait.py` / `cancel.py` | 조건 대기(timeout 필수, 취소 확인) / 중단 토큰(`Cancelled` 는 BaseException) |
 | `utils/process.py` | PID·생성시각·**이름으로 찾기**(`pids_by_name`) / `screen_locked()` (잠금 화면 앱 포함) |
 | `utils/winprobe.py` | 최상위 창을 싸게 찾기 (Win32). `rect_of()` / `child_windows()` 보이는 자식 창의 핸들·위치 — 그리드를 덮는 로딩 표시 / `new_window()` 기준선 뒤 새 창 / `focus_handle()`·`is_within()` 키보드 포커스가 그 컨트롤 안인가 (10-07~08) |
@@ -144,6 +146,7 @@
 | `probe_browser.py` | **사이트 화면 도우미** (10-07) — 127.0.0.1 가짜 사이트 + 진짜 Edge(창 없이): 가로막는 공지·마우스 올림 메뉴·팝업이 주고 닫히는 파일·HTML 을 엑셀 이름으로·알림창(기대 문구만)·새 줄만·업로드 폼·금지 꼴 소스 검사 (23). 실사이트·외부 접속 없음 |
 | `probe_webmail.py` | 메일 사이트 틀 — 사이트 폴더가 **진짜로 없을 때**·필수 설정·받기 실패 다시 열기(다시 받은 엑셀만 소비)·`[ ]` 제목·가짜 사이트로 수집 (17). 사이트 전용(페이지 넘김 등)은 git 밖 `tools/local/` |
 | `probe_userlog.py` | **사용자가 보는 글** — 10장면을 가짜로 돌려 내부 값이 새는지·건수·상품명·확인할 것·시험 실행 되돌리기·상세 페이지·브라우저 없음·사이트 화면 도우미 오류 문구(10-07) (119). `--write` 로 검토본 |
+| `probe_customer.py` | **업체 전용 끼움 자리** (10-08) — 가짜 업체(메모리)로 칸·고정 키·기능 목록·계획 순서·멈춘 곳부터 다시·영역별 시험 실행·원격 칸 거르기·웹이 그릴 것·실행 창 칸 값·물류대기 보류 없이·팝업 모두 [예]·메뉴 글자·서버 SQL·웹 자리. 업체가 없으면 원본 그대로인지 (47). 업체 한 곳의 시험은 git 밖 `tools/local/probe_customer_<id>` |
 | `probe_hooks.py` | 훅이 막을 것을 막는지 — 조작 실행·경로·비밀 키·서버 쓰기·실서버 SQL(APPROVED-SQL)·서브에이전트·PowerShell·규칙 경고(`wait_for_timeout`)·GitHub 에 올리기(`git push`·`gh repo create`·`--no-verify`·`npx wrangler@4 deploy`)·서브에이전트의 `.env`·구운 설정 읽기(대소문자 섞어도)·git/gh 다른 꼴(`git.exe`·`-C`·`bash -c`·커밋 검사 끄기·훅 자리 바꾸기·`gh gist/release/api` 쓰기)·서브에이전트의 셸 재귀 검색·비밀 파일 역슬래시 경로 (134) |
 | `probe_leaks.py` | **git 에 실값이 없나** (10-02) — 낱말 목록 없이 `settings.local.json`·`.env`·git 밖 사이트/업체 파일·이 PC 이름에서 값을 뽑고, 메일·전화·사용자 경로·내부 IP 모양도 본다. `파일:줄 — 어디서 온 값` 만 찍는다. 인자 없이 = 추적·새 파일의 지금 내용 / `--staged`(`.githooks/pre-commit`) / `--pre-push`(`pre-push`, 올리는 커밋만) / `--history`(손으로, 모든 ref) / `--selftest` (44). 감싼 비밀번호(dpapi:·baked:)는 풀어서 평문도 찾는다. 설정·.env 를 못 읽으면 커밋·push 를 막는다 |
 | `probe_history.py` | 지난 실행 이력·[실행 기록] 탭·건너뛴 예약(기록 파일·이어지면 한 줄) (19) |
@@ -168,7 +171,7 @@
 | `test_find_jump.py` | **찾기(Ctrl+F)·[조회] 로딩 측정** (10-07 2차 판, 데이터 안 바꿈 — 체크·보류·저장 안 누름) — [조회] 새 판정 확인(2초 뒤 다시 세기), 그리드별 스크롤바 요소·아래 남은 화면, 한 페이지 비용, 화면 밖 코드로 찾기(코드 칸 포커스·간 자리·윗행·돌아서 찾기·포함 검색·없는 값 알림), 부족 상품마다 정렬 뒤 첫 화면에 코드가 있나, 제품 `find_code`·찾기로 건너뛴 `check_matching_rows`(dry-run) 대 맨 위부터. `--launch` 는 흐름처럼 켜고 로그인(`--company` 업체코드만 바꿈 — 값은 명령줄에만). `--survey-only --deep N` 상품별 판정·두 길 견주기만 / `--requery 앞 뒤` 상품을 바꿀 때 하단이 언제 바뀌나 / `--find-check 상품` 제품 `find_code`(포커스 확인 포함). 결과는 `CONTROLS.md` "찾기(Ctrl+F) 창·조회 로딩 창". 지울 대상(승인 뒤) |
 | `test_open_screen.py` | **물류 화면 열기만** (09-29, 저장 없음) — `--screen wait` [일반]→[조회] / `stock` 재고검토→[조회] / `logistics` [등록(I)]. `--count` 는 흐름과 같은 함수로 전표 수를 센다(스크롤만) |
 | `test_collect.py` | 수집 RPA. `--check` / `--sms-only` / `--dry-run` |
-| `test_full.py` | 통합 흐름 콘솔 실행. `--modules orders,logistics` 로 기능 선택. 끝나면 창과 같은 리포트(`logs/report_*.html`) |
+| `test_full.py` | 통합 흐름 콘솔 실행. `--modules orders,logistics` 로 기능 선택. `--company` 업체코드만 바꿔 로그인(시험 계정, 10-08). 업체 빌드는 `RPA_CUSTOMER=<id>` 와 `--modules cx_…`. 끝나면 창과 같은 리포트(`logs/report_*.html`) |
 | `test_adb_wireless.py` | adb 무선 페어링·연결. 성공하면 `adb_wireless_address` 저장 |
 | `test_run_exe.py` | **빌드본으로 완주** — [실행] 은 사람이 누른다 |
 | `test_slow.py` | **느린 환경 만들기** (CPU 부하). 배율은 `probe_speed` 로 잰다 |
@@ -199,7 +202,7 @@ docs/
   RESOURCES.md        자원 사용량 / 탐색 계측 (09-08)
   BILLING.md          ★ 기능 선택(모듈화)·과금·트래픽 설계 — 확정 사항 (09-21, 과금 = 접속 사이트 수 09-30)
   SITES.md            다른 웹 사이트 추가 — Site/Task 계약·설정 경계·절차·체크리스트 (09-30). 스킬 site-add
-  CUSTOMERS.md        업체 전용 RPA 구조 — 업체 파일 + 끼움 자리 + 빌드에 그 업체만 (10-02 기획, 프로세스 확정 뒤 만든다)
+  CUSTOMERS.md        업체 전용 RPA 구조 — 틀 config/customer.py + 업체 패키지(git 밖) + 끼움 자리 + 빌드에 그 업체만 (10-08 만듦, 0절)
   WATCH.md            시간대 반복 조회 — 실행 한 번 안에서 N분마다 조회·저장 (10-06 기획, 만들기 전)
   SERVER_PLAN.md      서버 연동·웹 대시보드 — 지금 구조(D): RPA 와 서버의 역할·경계·원격·사용법 질문·
                       사용량 + D-10 규칙(ingest 순서·권한·RLS·웹·cron). 만들기 전 기획은 archive

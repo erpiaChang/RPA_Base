@@ -1580,12 +1580,15 @@ def go_to_logistics(target) -> None:
         ui.click(entry, "좌측 프로세스바 '물류처리'")
 
 
-def run(target, dry_run: bool = False) -> dict:
+def run(target, dry_run: bool = False, hold: bool = True) -> dict:
     """물류대기 전체 흐름.
 
     물류대기가 **없는 계정**이면 아무것도 하지 않고 `no_menu` 에 이유를 담아
     돌려준다. 물류관리로의 이동은 `logistics.run()` 이 스스로 한다
     (`logistics.open_screen` 이 [물류처리] 를 누른다).
+
+    `hold=False` 는 업체 빌드 (10-08, `config/customer.Profile.hold`) — 재고 부족 보류 없이 [일반] 저장만 하고
+    [물류처리] 도 누르지 않는다 (그 업체는 물류관리를 쓰지 않는다).
 
     ★ 결과의 `skipped` 는 **이미 보류라 건너뛴 상품 수**다. 단계를 건너뛴 표시는
       `no_menu` 로 따로 둔다.
@@ -1596,7 +1599,9 @@ def run(target, dry_run: bool = False) -> dict:
                 "excluded": [], "verify": {}, "items": [], "saved": 0,
                 "no_menu": NO_MENU_REASON}
     screen = open_screen(target)
-    result = hold_shortage_items(screen, pid=target.pid, dry_run=dry_run)
+    result = (hold_shortage_items(screen, pid=target.pid, dry_run=dry_run) if hold else
+              {"shortage": 0, "held": 0, "checked": 0, "skipped": 0, "excluded": [], "verify": {},
+               "items": [], "no_hold": True})
     saved_info: dict = {}
     result["saved"] = save_general(screen, dry_run=dry_run, info=saved_info)
     # 화면 밖 행이 있었으면 `saved` 는 건수가 아니다. 화면은 이것을 보고 숫자를 뺀다.
@@ -1606,7 +1611,8 @@ def run(target, dry_run: bool = False) -> dict:
     # (09-22). 떠 있는 채로 두면 [물류처리] 이동이 막힌다.
     result["save_message"] = ("" if dry_run or result["saved"] else
                               dialogs.dismiss_message_box(target.main_window()) or "")
-    go_to_logistics(target)
+    if hold:
+        go_to_logistics(target)
     return result
 
 

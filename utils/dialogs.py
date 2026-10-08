@@ -12,6 +12,7 @@ r"""공용 팝업(모달) 처리.
 from __future__ import annotations
 
 import re
+import time
 
 from utils.logger import get_logger
 
@@ -188,6 +189,80 @@ def _message_box(window):
 
     found = ui.search(window, auto_id=MESSAGE_BOX_AUTO_ID, control_type="Window")
     return found[0] if found else None
+
+
+YES_RE = re.compile(r"^예")
+CONFIRM_QUIET = 5.0       # 팝업도 바쁨도 이만큼 없으면 처리가 끝난 것으로 본다
+CONFIRM_LIMIT = 10        # 한 번 누른 뒤 이보다 많이 뜨면 같은 팝업이 되풀이되는 것 — 멈춘다
+CONFIRM_TIMEOUT = 600.0   # 처리(스피너·팝업)가 끝나기를 기다리는 상한
+
+
+class DialogStuck(RuntimeError):
+    """[예]/[확인] 이 없는 팝업이거나, 팝업이 너무 많거나, 처리가 끝나지 않았다 — 누르지 않고 멈춘다."""
+
+
+def has_message_box(window) -> str | None:
+    """ERPia 메시지 팝업이 떠 있으면 그 글 (`"제목: 본문"`), 없으면 None. 누르지 않는다."""
+    popup = _message_box(window) if window is not None else None
+    if popup is None:
+        return None
+    title, body = (popup.window_text() or "").strip(), text_of(popup)
+    return ": ".join(part for part in (title, body) if part) or "(본문 없음)"
+
+
+def confirm_all(window, what: str, busy=None, quiet: float = CONFIRM_QUIET,
+                limit: int = CONFIRM_LIMIT, timeout: float = CONFIRM_TIMEOUT) -> list[str]:
+    """누른 뒤 뜨는 ERPia 메시지 팝업을 **[예](없으면 [확인]) 로 모두** 넘긴다 — [아니오] 가 같이 있어도 [예] (10-08 업체 결정).
+
+    팝업도 `busy()`(스피너 등)도 `quiet` 초 동안 없으면 끝. 넘긴 팝업 글 목록을 돌려준다 (로그에도 하나씩).
+    [예]/[확인] 이 없는 팝업·`limit` 을 넘는 팝업·`timeout` 안에 안 끝나는 처리는 `DialogStuck`.
+    """
+    from utils import ui
+    from utils.wait import WaitTimeout, wait_for
+
+    texts: list[str] = []
+    calm: list = [None]
+
+    def settled() -> bool:
+
+        popup = _message_box(window)
+        if popup is not None:
+            text = has_message_box(window) or "(본문 없음)"
+            buttons = [b for b in ui.search(popup, control_type="Button") if b.element_info.automation_id]
+            button = (next((b for b in buttons if YES_RE.match(b.window_text() or "")), None)
+                      or next((b for b in buttons if OK_ONLY_RE.match(b.window_text() or "")), None))
+            if button is None:
+                raise DialogStuck(f"{what}: [예]/[확인] 이 없는 팝업이라 누르지 않았다 — {text[:200]}")
+            if len(texts) >= limit:
+                raise DialogStuck(f"{what}: 팝업이 {limit}개를 넘어 멈췄다 (마지막: {text[:200]})")
+            log.warning("%s 팝업 [%s] — [%s] 누름", what, text[:300], button.window_text())
+            ui.click(button, f"팝업 [{button.window_text()}]")
+            texts.append(text)
+            calm[0] = None
+            return False
+        if busy is not None and busy():
+            calm[0] = None
+            return False
+        now = time.monotonic()
+        if calm[0] is None:
+            calm[0] = now
+        return now - calm[0] >= quiet
+
+    def guarded() -> bool:
+        try:
+            return settled()
+        except DialogStuck as exc:             # wait_for 는 조건 안 예외를 '아직' 으로 본다 — 멈춤은 밖으로
+            guarded.stuck = exc
+            return True
+
+    guarded.stuck = None
+    try:
+        wait_for(guarded, f"{what} 처리 끝", timeout=timeout)
+    except WaitTimeout as exc:
+        raise DialogStuck(f"{what}: {timeout:.0f}초 안에 처리가 끝나지 않았다 (넘긴 팝업 {len(texts)}개)") from exc
+    if guarded.stuck is not None:
+        raise guarded.stuck
+    return texts
 
 
 def dismiss_message_box(window, timeout: float = 3.0) -> str | None:

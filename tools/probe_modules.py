@@ -100,7 +100,7 @@ def patched(calls: list[str]):
         calls.append("sales")
         return {"skipped": False, "before": "3", "after": "0"}
 
-    def fake_wait(target, dry_run=False):
+    def fake_wait(target, dry_run=False, hold=True):
         calls.append("logistics_wait")
         return {"shortage": 1, "held": 1, "saved": 2, "items": []}
 

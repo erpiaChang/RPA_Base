@@ -47,8 +47,11 @@ def _settings() -> str:
 
 
 def _modules() -> str:
+    from config.settings import CUSTOMER
+
     names: list[str] = []
-    for package in PACKAGES:
+    # 업체 빌드면 그 업체 패키지도 (10-08) — 번들에 빠졌으면 여기서 잡힌다
+    for package in PACKAGES + ((f"customers.{CUSTOMER.id}",) if CUSTOMER else ()):
         root = importlib.import_module(package)
         names += [info.name for info in pkgutil.walk_packages(root.__path__, prefix=f"{package}.")
                   if info.name not in SKIP]

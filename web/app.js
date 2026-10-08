@@ -82,9 +82,19 @@ function agoText(iso) {
   if (a < 86400) return `${Math.floor(a / 3600)}시간 전`;
   return `${Math.floor(a / 86400)}일 전`;
 }
+// 업체 전용 빌드의 기능 이름 (10-08) — 이 파일은 모든 업체가 받는 공개 파일이라 업체 기능을 적지 않는다.
+// PC 가 설정 답에 실어 보낸 [id, 이름] 을 기억해 쓴다 (docs/CUSTOMERS.md 4절)
+const customModules = new Map();
+function rememberModules(list) {
+  for (const m of list || []) if (Array.isArray(m) && /^cx_/.test(m[0])) customModules.set(m[0], m[1]);
+}
+function moduleName(id) {
+  const base = MODULES.find(m => m[0] === id);
+  return base ? base[1] : (customModules.get(id) || id);
+}
 function modulesText(mods) {
   if (!mods || !mods.length) return "전체";
-  return mods.map(id => (MODULES.find(m => m[0] === id) || [id, id])[1]).join(", ");
+  return mods.map(moduleName).join(", ");
 }
 function stateCell(state, labels) {
   const known = Object.prototype.hasOwnProperty.call(labels, state);
@@ -547,7 +557,9 @@ async function loadDevices(body) {
     if (d.paused) flags.push("일시정지");
     const online = ageSec(d.last_seen_at) < ONLINE_SEC;
     return h("tr", rowAction(() => go("#/device/" + d.id), d.id),
-      allAccounts() ? h("td", { text: d.accounts ? d.accounts.name : "" }) : null, h("td", { text: d.name }),
+      allAccounts() ? h("td", { text: d.accounts ? d.accounts.name : "" }) : null,
+      // 업체 전용 빌드면 그 업체 id 를 붙인다 (10-08, docs/CUSTOMERS.md 확정 3)
+      h("td", { text: d.customer ? `${d.name} · 전용 ${d.customer}` : d.name }),
       h("td", {}, h("span", { class: online ? "state-done" : "state-pending", text: online ? ONLINE_TEXT : OFFLINE_TEXT })),
       h("td", { text: d.last_seen_at ? `${fmtTime(d.last_seen_at)} (${agoText(d.last_seen_at)})` : "기록 없음" }),
       h("td", { class: "opt", text: d.next_run_at ? fmtTime(d.next_run_at) : "" }),
@@ -589,7 +601,7 @@ function slotError(line) {
   let tokens = line.split(/\s+/).filter(Boolean);
   if (tokens.length && /^[a-z_]+(,[a-z_]+)*$/.test(tokens[tokens.length - 1])) {
     const mods = tokens.pop().split(",");
-    if (new Set(mods).size !== mods.length || mods.some(m => !MODULES.some(x => x[0] === m))) return "끝에 붙인 기능 이름이 틀렸습니다";
+    if (new Set(mods).size !== mods.length || mods.some(m => !MODULES.some(x => x[0] === m) && !customModules.has(m))) return "끝에 붙인 기능 이름이 틀렸습니다";
   }
   if (tokens.length === 1) tokens = ["매일", tokens[0]];
   if (tokens.length === 3 && tokens[0] === "매월") tokens = [`매월 ${tokens[1]}`, tokens[2]];
@@ -636,8 +648,16 @@ async function renderDevice(deviceId, message) {
   let showState = null;     // 제어 단추를 지금 상태에 맞춰 켜고 끈다 — refresh 가 부른다
   let showPicks = null;     // PC 설정을 받으면 기능 체크를 PC 값으로 (기능 고정 빌드는 그 기능만)
   if (control) {
-    const picks = MODULES.map(([id, name]) => Object.assign(checkbox(name, false), { id }));
+    // 업체 전용 빌드면 PC 가 보낸 기능 목록으로 다시 그린다 (10-08) — 처음에는 원본 네 기능
+    let picks = [];
+    const pickBox = h("span", { class: "toolbar" });
+    const drawPicks = list => {
+      picks = list.map(([id, name]) => Object.assign(checkbox(name, false), { id }));
+      clear(pickBox); pickBox.append(...picks.map(p => p.el));
+    };
+    drawPicks(MODULES);
     showPicks = snap => {
+      if (snap.modules) { rememberModules(snap.modules); drawPicks(snap.modules); }
       const locked = snap.locked_modules, wanted = new Set(snap.settings.run_modules || []);
       for (const p of picks) {
         const allowed = !locked || locked.includes(p.id);
@@ -672,7 +692,7 @@ async function renderDevice(deviceId, message) {
       resume.disabled = !paused;
     };
     main.appendChild(h("section", {}, h("h2", { text: "제어" }),
-      h("div", { class: "toolbar" }, ...picks.map(p => p.el), start),
+      h("div", { class: "toolbar" }, pickBox, start),
       h("div", { class: "toolbar" }, stop, pause, resume),
       h("div", { class: "note", text: "일시정지는 예약을 멈춥니다 — 도는 실행은 [RPA 종료] 로 멈춥니다. " +
         "PC 의 화면이 잠겨 있거나 이미 실행 중이면 시작하지 않고 그 사유를 아래 기록에 남깁니다." }),
@@ -754,7 +774,20 @@ function settingsForm(deviceId, snap, editable) {
   const s = Object.assign({}, snap.settings || {});
   const locked = snap.locked_modules;
   const off = !editable;
-  const mods = MODULES.map(([id, name]) => Object.assign(checkbox(name, (s.run_modules || []).includes(id), off || !!locked), { id }));
+  // 업체 전용 빌드면 PC 가 보낸 기능 목록·업체 칸 정의로 그린다 (10-08). 원본 빌드는 둘 다 없다
+  const MODS = snap.modules || MODULES;
+  rememberModules(snap.modules);
+  const mods = MODS.map(([id, name]) => Object.assign(checkbox(name, (s.run_modules || []).includes(id), off || !!locked), { id }));
+  const cx = (snap.fields || []).map(f => {
+    const v = s[f.key];
+    const el = f.kind === "bool" ? checkbox(f.label, v, off)
+      : f.kind === "choice" ? select((f.choices || []).map(c => [c, c]), v, off)
+      : textInput(f.kind === "list" ? (v || []).join("; ") : v, off);
+    return { f, el };
+  });
+  const cxValue = ({ f, el }) => f.kind === "bool" ? el.box.checked
+    : f.kind === "list" ? splitList(el.value)
+    : (el.value.trim() || null);
   const srcs = SOURCES.map(([id, name]) => Object.assign(checkbox(name, (s.collect_sources || []).includes(id), off), { id }));
   const courier = textInput(s.delivery_company, off), box = textInput(s.delivery_box, off);
   const mode = select([["자동", "자동 — 저장 뒤 [운송장출력]"], ["수동", "수동 — 저장 뒤 [엑셀파일생성]"]], s.logistics_mode, off);
@@ -812,6 +845,7 @@ function settingsForm(deviceId, snap, editable) {
       if (!minutesText || !Number.isInteger(minutes) || minutes < 10 || minutes > 1440) return "간격은 10 ~ 1440 분입니다.";
       out.auto_run_interval_minutes = minutes;
     }
+    for (const c of cx) out[c.f.key] = cxValue(c);
     return out;
   };
   const save = h("button", { class: "primary", text: "저장", onclick: async () => {
@@ -838,7 +872,8 @@ function settingsForm(deviceId, snap, editable) {
   } });
   save.disabled = off;
   // PC 가 실행 중이면 칸을 잠근다 (09-29 사용자 요청 — 서버도 423 으로 거절한다). 기기 화면의 5초 갱신이 부른다
-  const fields = [...srcs.map(m => m.box), courier, box, mode, sales, hold, sms, adb, autoOn.box, autoMode, times, interval, save];
+  const fields = [...srcs.map(m => m.box), courier, box, mode, sales, hold, sms, adb, autoOn.box, autoMode, times, interval,
+    ...cx.map(c => c.el.box || c.el), save];
   const busyNote = h("div", { class: "note", role: "status" });
   const setRunning = running => {
     for (const f of fields) f.disabled = off || running;
@@ -863,8 +898,10 @@ function settingsForm(deviceId, snap, editable) {
     ...line("인증 문자", sms, " 무선 주소 ", adb),
     ...line("예약", autoOn.el, " ", autoMode),
     ...line("예약 줄 (한 줄에 하나)", times, h("div", { class: "note", text: "예) 평일 09:00 · 월수금 13:00 mail,orders · 매월 25일 18:00 · 2026-10-01 14:00 — " +
-      "끝에 기능을 붙이면 그 기능만: mail(메일 엑셀 받기) · orders(주문수집·매출처리) · logistics_wait(물류대기) · logistics(물류관리)" })),
-    ...line("간격 (분)", interval));
+      "끝에 기능을 붙이면 그 기능만: " + MODS.map(([id, name]) => `${id}(${name})`).join(" · ") })),
+    ...line("간격 (분)", interval),
+    ...(cx.length ? [h("div", { class: "note", text: `${snap.customer || "업체"} 전용` }), h("div")] : []),
+    ...cx.flatMap(c => line(c.f.label, c.el.el || c.el)));
   return { el: h("div", {}, busyNote, form, h("div", { class: "toolbar" }, save), note), setRunning };
 }
 
@@ -876,7 +913,7 @@ async function loadCommands(body, deviceId) {
   if (error) { say(body, "읽지 못했습니다: " + error.message, "err"); return; }
   if (!data || !data.length) { say(body, "보낸 명령이 없습니다."); return; }
   const rows = data.map(c => {
-    const names = (c.modules || []).map(id => (MODULES.find(m => m[0] === id) || [id, id])[1]);
+    const names = (c.modules || []).map(moduleName);
     const state = c.result || (c.taken_at ? "PC 가 받음 — 처리 중" : "PC 가 가져가기를 기다리는 중");
     return h("tr", {}, h("td", { text: fmtTime(c.created_at) }),
       h("td", { text: COMMAND_LABELS[c.kind] || String(c.kind || "") }),

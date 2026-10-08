@@ -97,6 +97,15 @@ def _collect_defaults() -> dict[str, object]:
 
 DEFAULTS = _collect_defaults()
 
+# 업체 전용 (10-08, `config/customer.py`) — 구운 값이 먼저, 개발 폴더는 로컬 설정. 그 업체의 칸(`cx_`)을 DEFAULTS 에 더한다.
+# 업체가 없으면 None — 원본 그대로
+from config import customer as _customer  # noqa: E402 — 경로 상수 뒤에 불러야 한다
+CUSTOMER = _customer.load(_customer.raw_id(BAKED_SETTINGS_PATH, LOCAL_SETTINGS_PATH)
+                          or _customer.dev_override(getattr(sys, "frozen", False)))
+if CUSTOMER is not None:
+    DEFAULTS.update({f.key: list(f.default) if isinstance(f.default, list) else f.default
+                     for f in CUSTOMER.fields})
+
 # --- 비밀로 다루는 항목 -----------------------------------------------------
 #
 # ★ 이 키들은 파일에 **평문으로 두지 않는다.** 읽을 때 풀고 쓸 때 감싼다
@@ -114,7 +123,7 @@ WORKER_PREFIX = "llm_"
 # ★ 여기 있는 키는 **구운 값이 최종**이다. exe 옆 `settings.local.json` 에 같은 키가 있어도 무시한다
 #   (그 파일은 사용자가 열어 고칠 수 있다). 사용자가 고치는 값은 여기 넣지 않는다.
 LOCKED_KEYS = ("login_company_code", "login_user_id", "mail_url", "mail_user_id",
-               "run_modules_locked", "server_url", "server_anon_key", "server_build_id")
+               "run_modules_locked", "server_url", "server_anon_key", "server_build_id", "customer")
 
 # 프로그램 판. 서버 보고(`orchestrator/telemetry.py`)가 보내고 웹 PC 표에 보인다.
 # 빌드가 '날짜-커밋 해시'(커밋 안 된 변경이 있으면 끝에 +)를 번들 `config/version.txt` 로 넣는다 (10-07, `tools/build_run.py`).

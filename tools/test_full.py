@@ -3,6 +3,7 @@ r"""[실행 도구 — **실제로 조작한다**] 통합 흐름을 콘솔에서
     .venv\Scripts\python.exe -m tools.test_full --dry-run
     .venv\Scripts\python.exe -m tools.test_full
     .venv\Scripts\python.exe -m tools.test_full --dry-run --modules orders,logistics
+    set RPA_CUSTOMER=<업체 id> & .venv\Scripts\python.exe -m tools.test_full --dry-run --modules cx_…  (업체 빌드, 10-08)
 
 메일에서 엑셀을 받아 저장하고, 이어서 프로그램을 실행해 업로드·매출처리·
 물류대기·물류관리까지 간다. 입력값은 `config/settings.local.json` 에서 읽는다.
@@ -41,7 +42,9 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true",
                         help="메일을 열지 않고, 클릭 대상만 확인한다")
     parser.add_argument("--modules", default="",
-                        help="고를 기능 (쉼표로): mail,orders,logistics_wait,logistics")
+                        help="고를 기능 (쉼표로): mail,orders,logistics_wait,logistics (업체 빌드면 cx_… 도)")
+    parser.add_argument("--company", default="",
+                        help="업체코드만 바꿔 로그인 (시험 계정 — 값은 명령줄에만, 설정에 쓰지 않는다)")
     args = parser.parse_args()
 
     log_path = setup_logging()
@@ -53,7 +56,7 @@ def main() -> int:
 
     options = erpia_flow.Options(
         exe=SETTINGS.target_exe,
-        company=SETTINGS.login_company_code,
+        company=args.company.strip() or SETTINGS.login_company_code,
         user_id=SETTINGS.login_user_id,
         password=SETTINGS.login_password,
         sources=list(SETTINGS.collect_sources or []),          # 기본값 없음 (10-02)

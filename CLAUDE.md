@@ -21,7 +21,9 @@
 공용으로 들어갈 만한 것만 원본에, 나머지는 그 업체 전용으로 둔다. 무엇이 공용인지는 **사용자가 정한다.**
 **여러 업체가 같은 규칙을 원해도 원본 설정으로 올리지 않는다** (10-02).
 업체별 요구·결정은 `docs/customers/<업체>.md` (첫 업체의 파일이 이미 있다 — 이름은 그 폴더에서 본다. 폴더는 git 밖).
-구조는 `docs/CUSTOMERS.md` (업체 파일 `customers/<업체>.py` + 원본의 끼움 자리, 빌드에 그 업체만) — **기획만, 정확한 프로세스가 나오면 만든다.**
+구조는 `docs/CUSTOMERS.md` — **10-08 에 만들었다** (첫 업체를 이 프로젝트로 옮김, 사용자 결정). 틀은 git 안 `config/customer.py`,
+업체 패키지는 git 밖 `customers/<id>/`. 빌드 프로그램이 업체를 골라 `customer` 를 굽고 잠근다. 개발 폴더에서 업체로 돌려 보려면
+설정 파일을 고치지 말고 환경변수 `RPA_CUSTOMER=<id>` (빌드본은 무시).
 
 ## 현재 상태
 
@@ -49,6 +51,7 @@
 | LLM 워커 (`llm/`) | `probe_llm` 42 — **필수** (속도·답은 `python llm\worker.py --bench`) |
 | 켜기 (`utils/autostart.py`·`utils/instance.py`·`utils/crashlog.py`·`utils/selfcheck.py`·`main_run.py`·`collect/pw_driver.py`·`build_run.spec`) | `probe_startup` 39 — **필수** (빌드 뒤 `--exe --browser`) |
 | 훅 (`.claude/hooks`) | `probe_hooks` 134 — **필수** |
+| 업체 전용 끼움 자리 (`config/customer.py`·`modules`·`full_flow`·`remote`·업체 칸) · 업체 패키지 (git 밖 `customers/`) | `probe_customer` 47 — **필수** (가짜 업체) · 업체마다 git 밖 `tools.local.probe_customer_<id>` |
 | 커밋·push (git 에 실값이 없나) | `probe_leaks --selftest` 44 · 인자 없이 걸린 줄 0 — 커밋 전·push 전 훅이 `--staged`·`--pre-push` 로 돈다 |
 
 **조사 결과가 없는 화면은 여전히 자동화 코드를 작성하지 않는다.**
@@ -260,7 +263,8 @@ orchestrator/ 업무 흐름 묶음: collect_flow / erpia_flow / full_flow / comm
               telemetry(서버 보고 — 큐·스레드·outbox)
               (run_app 은 full_flow 를 쓴다. collect_flow·erpia_flow 는 그 부품이자 개발 도구 test_collect·test_flow 의 흐름)
 automation/   ERPia 조작: application, login, updater(업데이트·UAC), sidebar(프로세스바 id),
-              order_mapping, logistics_wait, logistics
+              order_mapping, logistics_wait, logistics, menu(메뉴 검색으로 화면 열기)
+customers/    [git 밖] 업체 전용 패키지 `<id>/` — 틀은 config/customer.py (docs/CUSTOMERS.md)
 collect/      메일 수집 틀: webmail(MailSite 계약·로그인·수집), browser, sites(사이트 목록 — 사이트 파일은 git 밖 sites/local),
               storage, manifest, auth_code, phonelink, sms, pw_driver  (메일을 읽지 않음으로 되돌리지 않는다, 09-30)
 utils/        공통: ui, wait, cancel, logger, dialogs, filedialog, dpi,

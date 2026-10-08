@@ -34,7 +34,7 @@ from automation.order_mapping import (
     normalized_sales_mode,
 )
 from collect import manifest as manifest_mod
-from config.settings import SETTINGS
+from config.settings import CUSTOMER, SETTINGS
 from collect import storage
 from orchestrator import collect_flow, erpia_flow, modules, steps, steps_collect, steps_erpia
 from orchestrator.common import Hooks, Result
@@ -121,6 +121,13 @@ def run(options: erpia_flow.Options, hooks: Hooks | None = None,
     # 이 블록 안에서 도는 **모든 대기가 중단 토큰을 본다** (`utils/cancel.py`).
     with hooks.running():
         return _full(options, hooks, dry_run, chosen)
+
+
+def rehearsed(area: str, dry_run: bool, customer=None) -> bool:
+    """그 영역을 누르지 않고 확인만 할까 — 실행 전체가 시험 실행이거나, 업체 빌드가 그 영역을 시험 실행으로 두었다
+    (10-08, `config/customer.Profile.rehearse`). 업체가 없으면 실행 전체의 값 그대로."""
+    customer = CUSTOMER if customer is None else customer
+    return dry_run or bool(customer is not None and customer.rehearse is not None and customer.rehearse(area))
 
 
 def _full(options: erpia_flow.Options, hooks: Hooks, dry_run: bool,
@@ -217,7 +224,7 @@ def _full(options: erpia_flow.Options, hooks: Hooks, dry_run: bool,
                              "다음 실행에서 같은 엑셀이 다시 올라갈 수 있습니다")
 
         rows, upload_results = erpia_flow.collect_all(
-            screen, options, target.pid, hooks, dry_run=dry_run, uploads=uploads,
+            screen, options, target.pid, hooks, dry_run=rehearsed("collect", dry_run), uploads=uploads,
             site_failures=site_failures, site_info=site_info, on_uploaded=consumed)
         log.info("주문수집 후 조회된 주문 %d건", rows)
 
@@ -229,24 +236,33 @@ def _full(options: erpia_flow.Options, hooks: Hooks, dry_run: bool,
                         len(uploads))
 
         # ★ dry_run 을 반드시 넘긴다. 매출처리는 되돌릴 수 없다 (2026-09-10 감사).
-        sales, sales_text = erpia_flow.sales_stage(screen, target, hooks, dry_run)
+        sales, sales_text = erpia_flow.sales_stage(screen, target, hooks, rehearsed("sales", dry_run))
 
         parts.append(erpia_flow.upload_summary(upload_results))
         if site_info:
-            parts.append(f"자동수집: {erpia_flow.site_detail(site_info, dry_run)}")
+            parts.append(f"자동수집: {erpia_flow.site_detail(site_info, rehearsed('collect', dry_run))}")
         parts.append(sales_text)
 
     # --- 4) 물류대기 -----------------------------------------------------
     wait_result: dict = {}
     if modules.LOGI_WAIT.id in ids:
-        wait_result, text = erpia_flow.logistics_wait_stage(target, hooks, dry_run)
+        wait_result, text = erpia_flow.logistics_wait_stage(
+            target, hooks, rehearsed("logistics_wait", dry_run),
+            hold=CUSTOMER is None or CUSTOMER.hold)
         parts.append(text)
 
     # --- 5) 물류관리 -----------------------------------------------------
     logi: dict = {}
     if modules.LOGI.id in ids:
-        logi, text = erpia_flow.logistics_stage(target, options, hooks, dry_run)
+        logi, text = erpia_flow.logistics_stage(target, options, hooks, rehearsed("logistics", dry_run))
         parts.append(text)
+
+    # --- 6) 업체 기능 (10-08, `config/customer.py`) — 원본 뒤에 그 순서로 ----------------
+    extra: dict = {}
+    for module in chosen:
+        if module.run is not None:
+            extra[module.id], text = module.run(target, hooks, rehearsed(module.id, dry_run))
+            parts.append(text)
 
     # 저장까지 끝난 뒤에 **맨 마지막으로** 업로드 실패를 다시 적는다.
     if upload_results:
@@ -267,5 +283,5 @@ def _full(options: erpia_flow.Options, hooks: Hooks, dry_run: bool,
                   details={"collect": collect_details, "uploads": upload_results,
                            "rows": rows, "sales": sales,
                            "site_failures": site_failures,
-                           "logistics_wait": wait_result, "logistics": logi},
+                           "logistics_wait": wait_result, "logistics": logi, "customer": extra},
                   steps=hooks.report())

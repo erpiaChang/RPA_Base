@@ -182,6 +182,7 @@ SITE_FAIL_HINT = ("사이트 상태 '실패'는 주문이 없었거나 사이트
 NO_WAIT_MENU = "이 계정은 물류대기를 쓰지 않아 건너뜁니다"
 NO_SLIPS = "개별배송으로 올릴 주문 0건"
 NO_SCREEN = "주문매핑 화면을 열지 못해 건너뜀"
+NO_HOLD = "재고 부족 배송보류는 걸지 않음"      # 보류 없이 저장만 하는 업체 빌드 (10-08)
 TRIAL = "시험 실행"       # 사용자에게는 'dry-run' 대신 이 말을 쓴다 (09-21 검토)
 # ★ "아무것도 바꾸지 않는다" 고 쓰지 않는다 — 물류관리 [자동/수동] 콤보는 시험 실행에서도
 #   맞췄다가 끝에 되돌린다 (`logistics.run`). 되돌리기가 실패할 수 있어 바꾸지 않는 것만 적는다.
@@ -342,6 +343,8 @@ def hold_detail(result: dict, dry_run: bool = False) -> str:
     if result.get("no_menu"):
         return NO_WAIT_MENU
     parts = [f"확인만 함 ({TRIAL})"] if dry_run else []
+    if result.get("no_hold"):
+        parts.append(NO_HOLD)
     held = [item for item in result.get("items") or [] if item.get("state") in HELD_STATES]
     if held:
         orders = held_orders(held)
@@ -740,11 +743,11 @@ def sales_stage(screen, target, hooks: Hooks, dry_run: bool) -> tuple[dict, str]
     return result, sold.detail
 
 
-def logistics_wait_stage(target, hooks: Hooks, dry_run: bool) -> tuple[dict, str]:
-    """물류대기. `(결과, 요약 조각)`."""
+def logistics_wait_stage(target, hooks: Hooks, dry_run: bool, hold: bool = True) -> tuple[dict, str]:
+    """물류대기. `(결과, 요약 조각)`. `hold=False` 는 보류 없이 저장만 (업체 빌드, `logistics_wait.run`)."""
     result: dict = {}       # `sales_stage` 와 같은 이유
     with hooks.stage(steps_erpia.LOGI_WAIT) as waited:
-        result = logistics_wait.run(target, dry_run=dry_run)
+        result = logistics_wait.run(target, dry_run=dry_run, hold=hold)
         if result.get("save_message"):
             hooks.attend(f"물류대기 [저장] 뒤 ERPia 알림 '{result['save_message']}' — [확인]을 "
                          "누르고 넘어갔습니다. 저장되지 않았을 수 있으니 ERPia 물류대기 화면에서 "
@@ -756,6 +759,7 @@ def logistics_wait_stage(target, hooks: Hooks, dry_run: bool) -> tuple[dict, str
             # 이번에 건 보류가 없다 — 부족 상품 칸을 비워 두지 않고 한 줄로 (사용자 확정 09-22)
             waited.columns = SALES_COLUMNS
             waited.rows = [("배송보류", NO_WAIT_MENU if result.get("no_menu") else
+                            NO_HOLD if result.get("no_hold") else
                             "보류할 주문 없음" if dry_run else "이번에 건 배송보류 없음")]
         waited.detail = hold_detail(result, dry_run)
         # ★ 보류를 건 상품이 있을 때만 센다 (09-22 — 안 건 상품까지 세면 '1건 중 0건 성공').

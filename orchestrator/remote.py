@@ -19,6 +19,9 @@ import json
 import queue
 import threading
 
+from config.customer import PREFIX as CUSTOMER_PREFIX
+from config.settings import CUSTOMER
+from orchestrator.modules import ALL as MODULES
 from orchestrator.modules import IDS as MODULE_IDS
 from orchestrator.telemetry import _http_post, _server
 from utils.logger import get_logger
@@ -35,7 +38,9 @@ REMOTE_KEYS = (
     "run_modules", "auto_run_enabled", "auto_run_mode", "auto_run_times", "auto_run_interval_minutes",
     "collect_sources", "delivery_company", "delivery_box", "logistics_mode", "sales_mode", "hold_exclude_codes",
     "sms_source", "adb_connection", "adb_wireless_address",
-)
+) + tuple(field.key for field in (CUSTOMER.fields if CUSTOMER else ()))
+# 업체 칸 (10-08, `config/customer.py`) — 서버는 `cx_` 키를 종류(참거짓·글·목록)와 크기로만 거른다. 칸 정의는 이 PC 가 안다
+CUSTOMER_FIELDS = {field.key: field for field in (CUSTOMER.fields if CUSTOMER else ())}
 START, STOP, PAUSE, RESUME = "start", "stop", "pause", "resume"
 SETTINGS, READ_SETTINGS = "settings", "read_settings"
 SETTINGS_EVENT, READ_EVENT, COMMAND_EVENT = "settings", "read", "command"
@@ -71,7 +76,7 @@ def normalize(key: str, value: object) -> object:
 _CHOICES = {"auto_run_mode": ("daily", "interval"), "logistics_mode": ("자동", "수동"),
             "sales_mode": ("전체", "선택주문"),
             "sms_source": ("phonelink", "adb", "auto"), "adb_connection": ("usb", "wireless")}
-_TEXT_LISTS = {"run_modules": (1, 4, 20, MODULE_IDS), "collect_sources": (1, 2, 10, ("excel", "site")),
+_TEXT_LISTS = {"run_modules": (1, len(MODULE_IDS), 20, MODULE_IDS),"collect_sources": (1, 2, 10, ("excel", "site")),
                "auto_run_times": (0, 12, 60, None), "hold_exclude_codes": (0, 200, 50, None)}
 
 
@@ -88,7 +93,37 @@ def acceptable(key: str, value: object) -> bool:
         return isinstance(value, bool)
     if key == "auto_run_interval_minutes":
         return isinstance(value, int) and not isinstance(value, bool) and 10 <= value <= 1440
+    if key.startswith(CUSTOMER_PREFIX):
+        return customer_acceptable(CUSTOMER_FIELDS.get(key), value)
     return value is None or (isinstance(value, str) and len(value) <= 50)   # 택배사·박스·무선 주소
+
+
+# 업체 칸의 크기 상한 — 서버 `private.cx_value_ok` 와 같다
+CX_TEXT, CX_ITEMS, CX_ITEM = 300, 200, 100
+
+
+def customer_acceptable(field, value: object) -> bool:
+    """업체 칸 값 — 이 PC 의 칸 정의(종류·고르는 값)와 서버 상한에 맞나. 모르는 칸은 받지 않는다."""
+    if field is None:
+        return False
+    if field.kind == "bool":
+        return isinstance(value, bool)
+    if field.kind == "list":
+        return (isinstance(value, list) and len(value) <= CX_ITEMS
+                and all(isinstance(v, str) and len(v) <= CX_ITEM for v in value))
+    if field.kind == "choice":
+        return value is None or value in field.choices
+    return value is None or (isinstance(value, str) and len(value) <= CX_TEXT)
+
+
+def described() -> dict:
+    """웹이 그릴 것 — 업체 칸 정의와 기능 이름 (원본 웹은 업체 칸·기능을 모른다, `docs/CUSTOMERS.md` 4절). 업체가 없으면 빈 값."""
+    if CUSTOMER is None:
+        return {}
+    return {"customer": CUSTOMER.name,
+            "fields": [{"key": f.key, "label": f.label, "kind": f.kind, "choices": list(f.choices)}
+                       for f in CUSTOMER.fields],
+            "modules": [[module.id, module.name] for module in MODULES]}
 
 
 def sendable(values: dict) -> dict:
@@ -139,7 +174,7 @@ class Remote:
         """웹이 물은 지금 설정을 다음 poll 에 싣는다 — 원격 키만(비밀번호·경로 없음). 서버는 웹이 읽으면 지운다."""
         with self._lock:
             self._results.append({"id": command_id, "result": "보냄", "settings": _jsonable(sendable(values)),
-                                  "locked_modules": self._locked or None})
+                                  "locked_modules": self._locked or None, **described()})
         self._wake.set()
 
     # ---------------------------------------------------------------- 스레드
@@ -187,6 +222,10 @@ class Remote:
             if kind == SETTINGS:
                 values = command.get("settings") or {}
                 picked = {key: normalize(key, values[key]) for key in REMOTE_KEYS if key in values}
+                # 업체 칸은 서버가 종류·크기로만 거른다 — 고르는 값 등은 여기서 (틀린 값은 버리고 남긴다)
+                for key in [k for k in picked if k.startswith(CUSTOMER_PREFIX)
+                            and not customer_acceptable(CUSTOMER_FIELDS.get(k), picked[k])]:
+                    log.warning("웹이 보낸 업체 칸 값을 버린다 — %s=%r", key, picked.pop(key))
                 self.inbox.put((SETTINGS_EVENT, command_id, picked))
             elif kind == READ_SETTINGS:
                 self.inbox.put((READ_EVENT, command_id))

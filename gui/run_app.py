@@ -31,7 +31,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from automation import logistics, order_mapping
 from automation.application import find_exe, is_erpia_exe, logged_in_pids
-from config.settings import SETTINGS, save_local
+from config.settings import CUSTOMER, SETTINGS, save_local
 from gui.autorun_pane import AutoRunPane
 from gui.common import (WINDOW_FRAME_MARGIN, DetailPane, apply_scaling, ui_scale,
                         work_area)
@@ -146,6 +146,34 @@ def _join_codes(codes: object) -> str:
     return "; ".join(str(c).strip() for c in (codes or []) if str(c).strip())
 
 
+def _customer_var(field) -> tk.Variable:
+    """업체 칸 하나의 화면 변수 — 지금 설정 값으로 채운다."""
+    var = tk.BooleanVar() if field.kind == "bool" else tk.StringVar()
+    _set_customer_var(field, var, getattr(SETTINGS, field.key, None))
+    return var
+
+
+def _set_customer_var(field, var: tk.Variable, value: object) -> None:
+    if field.kind == "bool":
+        var.set(bool(value))
+    elif field.kind == "list":
+        var.set(_join_codes(value))
+    else:
+        var.set("" if value is None else str(value))
+
+
+def _customer_value(field, var: tk.Variable) -> object:
+    """화면 변수 → 설정 값. 고르는 칸에 모르는 값이면 None — 업체가 정한 안전한 쪽(시험 실행 등)으로 읽힌다."""
+    if field.kind == "bool":
+        return bool(var.get())
+    if field.kind == "list":
+        return _split_codes(var.get())
+    text = var.get().strip()
+    if field.kind == "choice":
+        return text if text in field.choices else None
+    return text or None
+
+
 def _split_codes(text: str) -> list[str]:
     return [part.strip() for part in text.replace(",", ";").split(";") if part.strip()]
 
@@ -213,6 +241,8 @@ class RunWindow(ErpiaWindow):
         # 매출처리 방식 (10-01). 비었거나 모르는 값이면 어느 쪽도 안 골린 채로 뜨고 [실행] 이 잠긴다 (`_values`, 기본값 없음 10-02)
         self.sales_var = tk.StringVar(value=(getattr(SETTINGS, "sales_mode", None) or "").strip())
         self.sales_var.trace_add("write", self._on_field_changed)     # 고르면 [실행] 잠금을 다시 본다
+        # 업체 전용 칸 (10-08, `config/customer.py`) — 업체 빌드에만. 칸 정의대로 [설정] 탭 업체 묶음에 그린다
+        self.customer_vars = {field.key: _customer_var(field) for field in (CUSTOMER.fields if CUSTOMER else ())}
         # 맨 위 알림 창 하나 (예약 전 경고·휴대폰 점검, 10-01) — 모달이 아니다
         self._notice: tk.Toplevel | None = None
         self._notice_kind = ""
@@ -641,6 +671,10 @@ class RunWindow(ErpiaWindow):
             radio.configure(command=self._schedule_save)
             self._help_for(radio, MODE_HELP)
 
+        if CUSTOMER is not None and CUSTOMER.fields:
+            row += 1
+            self._customer_section(self._section(body, row, CUSTOMER.name))
+
         # 자동 켜기 (09-28). 빌드본에서만 보인다 — 개발 중에 python 을 로그온 켜기로 등록하지 않는다.
         # 이것은 체크하는 순간 저장한다 (작업 스케줄러 등록까지 같이 한다)
         row += 1
@@ -678,6 +712,26 @@ class RunWindow(ErpiaWindow):
             history=False,
         )
         self.autorun_pane.grid(row=0, column=0, sticky="new")
+
+    def _customer_section(self, box: ttk.LabelFrame) -> None:
+        """업체 전용 칸 — 칸 정의(`Field.kind`)대로 그린다. 업체마다 화면 코드를 쓰지 않는다 (`docs/CUSTOMERS.md` 4절)."""
+        for index, field in enumerate(CUSTOMER.fields):
+            var = self.customer_vars[field.key]
+            if field.kind == "text" or field.kind == "list":
+                self._labeled(box, index, field.label, var, help_text=field.help)
+                continue
+            ttk.Label(box, text=field.label, width=14, anchor="w").grid(
+                row=index, column=0, padx=(0, 8), pady=(8, 0), sticky="w")
+            holder = ttk.Frame(box)
+            holder.grid(row=index, column=1, pady=(8, 0), sticky="w")
+            if field.kind == "bool":
+                widgets = [ttk.Checkbutton(holder, variable=var, command=self._schedule_save)]
+            else:
+                widgets = [ttk.Radiobutton(holder, text=choice, value=choice, variable=var,
+                                           command=self._schedule_save) for choice in field.choices]
+            for position, widget in enumerate(widgets):
+                widget.grid(row=0, column=position, padx=(0, 16))
+                self._help_for(widget, field.help)
 
     def _section(self, parent: ttk.Frame, row: int, title: str, shown: bool = True) -> ttk.LabelFrame:
         """설정 묶음 하나. 이 빌드에 없는 기능의 묶음은 숨긴다 — 칸은 만들어 둔다(잠금·저장이 칸을 본다)."""
@@ -1086,6 +1140,8 @@ class RunWindow(ErpiaWindow):
         values["sms_source"], values["adb_connection"] = source, connection
         values["adb_wireless_address"] = self.adb_addr_var.get().strip() or None
         values["sales_mode"] = self.sales_var.get() or None
+        for field in CUSTOMER.fields if CUSTOMER else ():
+            values[field.key] = _customer_value(field, self.customer_vars[field.key])
         # 창에서 체크한 기능을 남긴다. 예약 회차의 기능으로 덮지 않는다.
         # 기능 고정 빌드는 구운 값이 전부라 exe 옆 설정에 쓰지 않는다.
         if self.locked_modules is None:
@@ -1524,6 +1580,9 @@ class RunWindow(ErpiaWindow):
             self.sales_var.set((getattr(SETTINGS, "sales_mode", None) or "").strip())
         if "hold_exclude_codes" in changed:
             self.hold_var.set(_join_codes(SETTINGS.hold_exclude_codes))
+        for field in CUSTOMER.fields if CUSTOMER else ():
+            if field.key in changed:
+                _set_customer_var(field, self.customer_vars[field.key], getattr(SETTINGS, field.key, None))
         if {"sms_source", "adb_connection"} & set(changed):
             self.sms_var.set(_sms_label(SETTINGS.sms_source, SETTINGS.adb_connection))
         if "adb_wireless_address" in changed:

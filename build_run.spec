@@ -56,6 +56,19 @@ DEV_ONLY = [
     "llm",                       # LLM 전용 PC 의 워커 (09-28) — RPA 에 들어가면 안 된다
 ]
 
+# ★ 업체 전용 (10-08, `docs/CUSTOMERS.md` 4절) — 구운 `customer` 의 업체 패키지 **하나만** 넣는다.
+#   `config/settings.py` 가 이름으로(`importlib`) 불러 정적 분석에 안 잡히므로 이름으로 넣고,
+#   다른 업체 패키지는 금지 목록에 더한다 — 섞이면 아래 누출 검사가 빌드를 멈춘다. 업체가 없으면 업체 패키지 전부 금지.
+from config import customer as _customer  # noqa: E402
+CUSTOMER_ID = (json.loads(open(BAKED_SOURCE, encoding="utf-8").read()).get("customer") or "").strip()
+if CUSTOMER_ID:
+    if CUSTOMER_ID not in _customer.available():
+        raise SystemExit(f"[빌드 중단] 구운 업체 '{CUSTOMER_ID}' 의 패키지가 없다: customers/{CUSTOMER_ID}/ (git 밖)")
+    HIDDEN += ["customers"] + collect_submodules(f"customers.{CUSTOMER_ID}")
+    CUSTOMER_BLOCKED = [f"customers.{other}" for other in _customer.available() if other != CUSTOMER_ID]
+else:
+    CUSTOMER_BLOCKED = ["customers"]
+
 # 설치돼 있으면 딸려 들어갈 수 있는 무거운 패키지. 이 프로그램은 쓰지 않는다.
 UNUSED_LIBS = [
     "psutil",
@@ -91,7 +104,7 @@ a = Analysis(
 )
 
 # ---------------------------------------------------------------- 확인
-_OURS = ("main_run", "gui", "automation", "collect", "orchestrator", "config", "utils", "tools", "llm")
+_OURS = ("main_run", "gui", "automation", "collect", "orchestrator", "config", "utils", "tools", "llm", "customers")
 _bundled = sorted(
     name for name, _path, _kind in a.pure
     if name.split(".")[0] in _OURS
@@ -103,7 +116,7 @@ for _name in _bundled:
 
 # ★ 이 검사가 유일한 안전장치다. `excludes` 로 숨기지 않았으므로,
 #   누군가 금지 모듈을 import 하면 여기서 **빌드가 멈춘다.**
-_blocked = DEV_ONLY
+_blocked = DEV_ONLY + CUSTOMER_BLOCKED
 _leaked = [n for n in _bundled
            if any(n == b or n.startswith(b + ".") for b in _blocked)]
 if _leaked:
@@ -112,6 +125,10 @@ if _leaked:
         "— 누군가 이 모듈을 import 하고 있다. 의존을 끊을 것."
     )
 print(f" 금지 모듈 {len(_blocked)}종 누출 없음 (검사 대상: {', '.join(_blocked)})")
+if CUSTOMER_ID:
+    if f"customers.{CUSTOMER_ID}" not in _bundled:
+        raise SystemExit(f"[빌드 중단] 업체 패키지 customers.{CUSTOMER_ID} 가 번들에 들어가지 않았다.")
+    print(f" 업체 전용: {CUSTOMER_ID}")
 
 # 구운 설정이 실제로 들어갔는지 확인한다. 빠지면 값이 통째로 빈 exe 가 된다.
 for _name in ("config/settings.baked.json", "config/baked.key"):

@@ -56,6 +56,7 @@
 | `logistics_mode` | `자동` | 물류관리 상단 [자동/수동] 콤보에 맞출 값. `자동` 이면 저장 뒤 [운송장출력], `수동` 이면 [엑셀파일생성] 을 누른다. 비우면 [실행] 이 '입력 필요' 로 잠긴다 |
 | `sales_mode` | `전체` | 매출처리 방식 (10-01). `전체` = [매출처리] 단추 — **조회되지 않은 미매출 주문까지** 처리 / `선택주문` = 조회된 주문만 전부 체크해 우클릭 [선택주문 매출처리]. 비우거나 다른 값이면 [실행] 이 '입력 필요' 로 잠긴다 |
 | `hold_exclude_codes` | `["8800000000001"]` | 물류대기에서 **배송보류를 걸지 않을** 상품코드. 완전일치 |
+| `customer` | `""` | **업체 전용 빌드**의 업체 id (10-08, `docs/CUSTOMERS.md`). 빌드 프로그램이 고르고 **굽고 잠근다** (`LOCKED_KEYS`). 비면 원본. 그 업체의 칸(`cx_` 로 시작)이 이 파일에 더해지고 실행 창 [설정] 탭 업체 묶음·웹에 보인다. 개발 폴더에서 시험할 때는 이 키 대신 환경변수 `RPA_CUSTOMER` |
 | `excel_passwords` | `{"사이트B": "0000"}` | 암호 걸린 엑셀의 비밀번호. **사이트명별** |
 | `excel_password` | `""` | 사이트별 값이 없을 때 쓸 기본 비밀번호 |
 | `collect_site_code` | `""` | **개발 도구 전용.** 사이트코드로 한 건만 올릴 때 |
@@ -217,7 +218,7 @@ LLM 전용 PC 에만 있는 값 (09-28): `llm_worker_key` — 사용법 질문 �
 | --- | --- |
 | 웹에서 설정 보기 | 웹이 PC 화면을 열면 PC 에 묻는다 → PC 가 다음 확인(30초 안)에 지금 값을 답한다 → 웹이 한 번 읽으면 서버가 지운다. PC 가 꺼져 있으면 볼 수 없다 |
 | 웹에서 바꾼 설정 | 바꾼 키만 온다. 받으면 exe 옆 `settings.local.json` 에 저장하고 화면 칸에 옮긴다 (서버는 건넨 뒤 지운다, 2분 안에 안 가져가면 버린다). **실행 중이면 끝난 뒤** 적용한다. 09-29 부터 **PC 가 실행 중이면 웹에서 저장할 수 없다** — 웹이 칸을 잠그고 서버(`set_device_settings`)도 423 으로 거절한다 |
-| 웹에서 바꿀 수 있는 키 | `run_modules`(기능 고정 빌드는 PC 가 버린다)·`auto_run_*` 4개·`collect_sources`·`delivery_company`·`delivery_box`·`logistics_mode`·`sales_mode`(10-02)·`hold_exclude_codes`·`sms_source`·`adb_connection`·`adb_wireless_address` — **비밀번호와 PC 의 경로는 없다** (보지도 바꾸지도 못한다) |
+| 웹에서 바꿀 수 있는 키 | `run_modules`(기능 고정 빌드는 PC 가 버린다)·`auto_run_*` 4개·`collect_sources`·`delivery_company`·`delivery_box`·`logistics_mode`·`sales_mode`(10-02)·`hold_exclude_codes`·`sms_source`·`adb_connection`·`adb_wireless_address`·**업체 빌드의 `cx_` 칸** (10-08 — 웹은 PC 가 보낸 칸 정의로 그린다) — **비밀번호와 PC 의 경로는 없다** (보지도 바꾸지도 못한다) |
 | 창에서 고친 값 | 이 파일에만 저장한다 — 서버에 올리지 않는다 (10-07) |
 | [실행] | 예약 회차처럼 무인으로 돈다 (이력·리포트의 '어떻게' = `원격 실행`). 실행 중·잠긴 화면·서버 확인 전이면 시작하지 않고 사유를 웹에 남긴다. 10분 안에 못 받은 명령은 버린다 |
 | [RPA 종료] / [일시정지]·[계속하기] | 창의 [중단] 과 같다 (확인 창 없이) / 창 [예약] 탭의 [일시정지]·[계속하기] 와 같다 (09-29 이름을 맞췄다) — **예약**을 멈춘다. 웹에서 [RPA 종료] 는 실행 중일 때만, [일시정지] 는 일시정지가 아닐 때만, [계속하기] 는 일시정지일 때만 눌린다 |
@@ -305,6 +306,7 @@ LLM 전용 PC 에만 있는 값 (09-28): `llm_worker_key` — 사용법 질문 �
 | `login_company_code` · `login_user_id` | ERPia 업체코드·아이디 |
 | `mail_url` · `mail_user_id` | 사이트 주소·아이디 |
 | `run_modules_locked` | 기능 고정 여부. 이것이 참이면 `run_modules` 까지 고정된다 |
+| `customer` | 업체 전용 빌드의 업체 (10-08) |
 | `server_url` · `server_anon_key` · `server_build_id` | 서버 |
 
 `target_exe_name` 은 굽기만 한다 — `LOCKED_KEYS` 가 아니라서 위 표에 없고(exe 옆 설정이 덮을 수 있다), 실행 창에 칸도 없다 (10-02).

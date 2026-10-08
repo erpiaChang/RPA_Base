@@ -61,6 +61,10 @@ create index if not exists devices_account_idx on public.devices(account_id);
 -- PC 를 바꾸려면 **다시 빌드해서 준다** (푸는 길은 두지 않는다 — 사용자 확정 09-28).
 alter table public.devices add column if not exists machine_hash text;   -- sha256(Windows MachineGuid)
 alter table public.devices add column if not exists bound_at     timestamptz;   -- 그 PC 에 묶인 시각
+-- 업체 전용 빌드의 업체 id (10-08, `docs/CUSTOMERS.md` 확정 3) — exe 에 든 업체 패키지. 원본 빌드는 null.
+-- 서버의 '업체'(accounts, 그 RPA 를 쓰는 회사)와는 다른 값이다. register_build 가 넣는다
+alter table public.devices add column if not exists customer text
+    check (customer is null or customer ~ '^[a-z0-9_]{1,30}$');
 -- 09-23 판에서 넘어오는 경우: 이름만 바꾼다 (자기 등록 시각 = 묶인 시각)
 do $do$
 begin
@@ -518,7 +522,11 @@ drop function if exists public.enroll(text, text, text);
 drop function if exists public.issue_enroll_token(text, int, int);
 drop function if exists public.issue_device_key(text, text);
 
-create or replace function public.register_build(account_name text, build_name text) returns text
+-- 10-08: 업체 전용 빌드의 업체 id 를 받는다 (`customer`, 없으면 원본). 옛 두 인자 판은 지운다 — 남기면 두 인자로 부를 때
+-- 어느 판인지 정하지 못한다
+drop function if exists public.register_build(text, text);
+create or replace function public.register_build(account_name text, build_name text, customer text default null)
+returns text
 language plpgsql security definer set search_path = '' as $$
 declare
     v_account uuid;
@@ -530,7 +538,8 @@ begin
         raise exception 'forbidden' using errcode = 'PT403';
     end if;
     if account_name is null or length(trim(account_name)) = 0 or length(account_name) > 100
-       or build_name is null or length(trim(build_name)) = 0 or length(build_name) > 100 then
+       or build_name is null or length(trim(build_name)) = 0 or length(build_name) > 100
+       or (customer is not null and customer !~ '^[a-z0-9_]{1,30}$') then
         raise exception 'bad request' using errcode = 'PT400';
     end if;
     select id into v_account from public.accounts where name = account_name;
@@ -538,13 +547,13 @@ begin
         insert into public.accounts (name) values (account_name) returning id into v_account;
     end if;
     v_id := 'bld_' || translate(encode(extensions.gen_random_bytes(32), 'base64'), '+/=', '-_');
-    insert into public.devices (account_id, name, key_hash)
-    values (v_account, trim(build_name), encode(sha256(convert_to(v_id, 'UTF8')), 'hex'));
+    insert into public.devices (account_id, name, key_hash, customer)
+    values (v_account, trim(build_name), encode(sha256(convert_to(v_id, 'UTF8')), 'hex'), register_build.customer);
     return v_id;
 end;
 $$;
-revoke execute on function public.register_build(text, text) from public, anon;
-grant execute on function public.register_build(text, text) to authenticated;   -- 안에서 is_admin 검사
+revoke execute on function public.register_build(text, text, text) from public, anon;
+grant execute on function public.register_build(text, text, text) to authenticated;   -- 안에서 is_admin 검사
 
 -- 빌드 폐기. 그 뒤로 그 빌드 ID 의 ingest 는 401 이고, 실행 창이 잠긴다.
 create or replace function public.revoke_device(device uuid) returns void
@@ -849,6 +858,52 @@ language sql immutable set search_path = '' as $$
                           or (allowed is not null and not ((x #>> '{}') = any (allowed))));
 $$;
 
+-- 기능 목록 (10-08) — 원본 네 기능 + 업체 기능(`cx_`, 그 업체 빌드만 안다 — `docs/CUSTOMERS.md`). 겹치지 않게, 8개까지
+create or replace function private.modules_ok(v jsonb, min_n int) returns boolean
+language sql immutable set search_path = '' as $$
+    select jsonb_typeof(v) = 'array'
+       and jsonb_array_length(v) between min_n and 8
+       and (select count(distinct x) from jsonb_array_elements(v) x) = jsonb_array_length(v)
+       and not exists (select 1 from jsonb_array_elements(v) x
+                       where jsonb_typeof(x) <> 'string'
+                          or not ((x #>> '{}') in ('mail','orders','logistics_wait','logistics')
+                                  or (x #>> '{}') ~ '^cx_[a-z0-9_]{1,30}$'));
+$$;
+
+-- 업체 칸 값 (10-08) — 서버는 업체 칸 정의를 모른다. 종류와 크기만 본다 (고르는 값 등은 PC 가 거른다, `orchestrator/remote.py`).
+-- 상한은 remote.CX_TEXT·CX_ITEMS·CX_ITEM 과 같다
+create or replace function private.cx_value_ok(v jsonb) returns boolean
+language sql immutable set search_path = '' as $$
+    select case jsonb_typeof(v)
+        when 'null' then true
+        when 'boolean' then true
+        when 'string' then length(v #>> '{}') <= 300
+        when 'array' then private.text_list_ok(v, 0, 200, 100)
+        else false
+    end;
+$$;
+
+-- PC 가 설정 답에 싣는 '웹이 그릴 것' (10-08) — 업체 이름·업체 칸 정의·기능 이름. 웹은 textContent 로만 쓴다.
+-- 틀리면 null (그 부분만 버린다 — 설정 답은 그대로 쓴다)
+create or replace function private.described_ok(r jsonb) returns jsonb
+language sql immutable set search_path = '' as $$
+    select case when
+        jsonb_typeof(r->'customer') = 'string' and length(r->>'customer') <= 40
+        and jsonb_typeof(r->'fields') = 'array' and jsonb_array_length(r->'fields') <= 20
+        and not exists (select 1 from jsonb_array_elements(r->'fields') f
+                        where jsonb_typeof(f) <> 'object'
+                           or (f->>'key') is null or (f->>'key') !~ '^cx_[a-z0-9_]{1,40}$'
+                           or jsonb_typeof(f->'label') <> 'string' or length(f->>'label') > 40
+                           or coalesce(f->>'kind', '') not in ('choice','list','text','bool')
+                           or not private.text_list_ok(coalesce(f->'choices', '[]'::jsonb), 0, 10, 30))
+        and jsonb_typeof(r->'modules') = 'array' and jsonb_array_length(r->'modules') <= 8
+        and not exists (select 1 from jsonb_array_elements(r->'modules') m
+                        where not private.text_list_ok(m, 2, 2, 40)
+                           or not private.modules_ok(jsonb_build_array(m->0), 1))
+    then jsonb_build_object('customer', r->'customer', 'fields', r->'fields', 'modules', r->'modules')
+    end;
+$$;
+
 -- 웹·PC 가 올리는 설정을 거른다. **모르는 키는 요청 전체를 거부한다** — 비밀번호 키도 여기서 막힌다.
 -- 키 목록은 `orchestrator/remote.py` 의 REMOTE_KEYS 와 같다. 예약 줄의 꼴은 PC 가 다시 검사한다 (틀린 줄은 버린다).
 create or replace function private.clean_settings(s jsonb) returns jsonb
@@ -865,8 +920,7 @@ begin
     end if;
     for v_key, v_val in select * from jsonb_each(s) loop
         v_ok := case v_key
-            when 'run_modules' then private.text_list_ok(v_val, 1, 4, 20,
-                                        array['mail','orders','logistics_wait','logistics'])
+            when 'run_modules' then private.modules_ok(v_val, 1)
             when 'collect_sources' then private.text_list_ok(v_val, 1, 2, 10, array['excel','site'])
             when 'auto_run_times' then private.text_list_ok(v_val, 0, 12, 60)
             when 'hold_exclude_codes' then private.text_list_ok(v_val, 0, 200, 50)
@@ -886,7 +940,8 @@ begin
                  or (jsonb_typeof(v_val) = 'string' and length(v_val #>> '{}') <= 50)
             when 'adb_wireless_address' then jsonb_typeof(v_val) = 'null'
                  or (jsonb_typeof(v_val) = 'string' and length(v_val #>> '{}') <= 50)
-            else false
+            -- 업체 칸 (10-08) — 키 꼴과 값의 종류·크기만. 그 업체 빌드의 PC 가 칸 정의로 다시 거른다
+            else v_key ~ '^cx_[a-z0-9_]{1,40}$' and private.cx_value_ok(v_val)
         end;
         if not coalesce(v_ok, false) then
             raise exception 'bad request' using errcode = 'PT400';
@@ -896,6 +951,7 @@ begin
 end;
 $$;
 revoke execute on function private.text_list_ok(jsonb, int, int, int, text[]),
+                           private.modules_ok(jsonb, int), private.cx_value_ok(jsonb), private.described_ok(jsonb),
                            private.clean_settings(jsonb) from public, anon, authenticated;
 
 -- 웹이 부른다. 바꿀 값만 명령에 실어 둔다 — PC 가 다음 poll 에 가져가 제 설정 파일에 저장하고, 서버는 그때 지운다.
@@ -1001,9 +1057,7 @@ begin
         raise exception 'forbidden' using errcode = 'PT403';
     end if;
     if kind is null or kind not in ('start','stop','pause','resume')
-       or coalesce(cardinality(modules), 0) > 4
-       or exists (select 1 from unnest(coalesce(modules, '{}'::text[])) m
-                  where m not in ('mail','orders','logistics_wait','logistics')) then
+       or not private.modules_ok(to_jsonb(coalesce(modules, '{}'::text[])), 0) then
         raise exception 'bad request' using errcode = 'PT400';
     end if;
     -- 쌓아 두지 않는다. 가져가지 않은 명령이 다섯 개면 PC 가 꺼져 있는 것이다
@@ -1049,9 +1103,10 @@ begin
             if v_res ? 'settings' then
                 begin
                     v_reply := jsonb_build_object('settings', private.clean_settings(v_res->'settings'),
-                        'locked_modules', case when private.text_list_ok(v_res->'locked_modules', 1, 4, 20,
-                                               array['mail','orders','logistics_wait','logistics'])
-                                          then v_res->'locked_modules' end);
+                        'locked_modules', case when private.modules_ok(v_res->'locked_modules', 1)
+                                          then v_res->'locked_modules' end)
+                           -- 업체 빌드만 (10-08) — 업체 이름·칸 정의·기능 이름. 틀리면 그 부분만 뺀다
+                           || coalesce(private.described_ok(v_res), '{}'::jsonb);
                 exception when others then
                     v_reply := null;            -- 규칙에 어긋난 값 — 이 답만 버린다 (명령 결과는 계속 받는다)
                 end;

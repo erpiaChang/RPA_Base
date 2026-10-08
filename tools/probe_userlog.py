@@ -191,7 +191,7 @@ def fakes(scene: str, dry_run: bool):
         return {"before": "47건", "after": "3건", "clicked": "Invoke",
                 "dialogs": ["정상매출처리 성공"], "skipped": False}
 
-    def wait_run(target, dry_run=dry_run):
+    def wait_run(target, dry_run=dry_run, hold=True):
         if scene == "popup_continue":
             # 저장 실패 알림이 떠서 다음 조작이 막힌 꼴 — 흐름은 알림을 닫고 물류관리로 가야 한다
             raise logistics_wait.ScreenError("[물류처리] 를 누를 수 없다")

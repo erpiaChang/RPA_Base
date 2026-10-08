@@ -84,6 +84,9 @@ DEFAULTS: dict[str, object] = {
     # None = 아직 안 물었다 — 빌드본이 처음 뜰 때 사람에게 묻고 답을 남긴다. **굽지 않는다** (그 PC 의 선택)
     "auto_start": None,
 
+    # 업체 전용 빌드의 업체 id (10-08, `config/customer.py`·`docs/CUSTOMERS.md`). 빌드 프로그램이 고르고 **굽고 잠근다.**
+    # 비면 원본 그대로. 업체 패키지는 git 밖 `customers/<id>/`
+    "customer": None,
     # --- 서버 보고 (`docs/SERVER_PLAN.md` D 절) ---
     #
     # 셋 다 있어야 보고한다. 하나라도 비면 **보고하지 않고** 지금처럼 돈다.
