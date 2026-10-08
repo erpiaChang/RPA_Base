@@ -168,7 +168,6 @@
 | `probe_speed.py` / `probe_resources.py` / `probe_search_trace.py` | 속도 배율 / 자원 / 탐색 집계 (`test_flow --trace`) |
 | **조작 (`APPROVED-RUN` 필요)** | |
 | `test_flow.py` | 전체 흐름 콘솔 실행. `--from` `--yes` `--dry-run` `--trace` |
-| `test_find_jump.py` | **찾기(Ctrl+F)·[조회] 로딩 측정** (10-07 2차 판, 데이터 안 바꿈 — 체크·보류·저장 안 누름) — [조회] 새 판정 확인(2초 뒤 다시 세기), 그리드별 스크롤바 요소·아래 남은 화면, 한 페이지 비용, 화면 밖 코드로 찾기(코드 칸 포커스·간 자리·윗행·돌아서 찾기·포함 검색·없는 값 알림), 부족 상품마다 정렬 뒤 첫 화면에 코드가 있나, 제품 `find_code`·찾기로 건너뛴 `check_matching_rows`(dry-run) 대 맨 위부터. `--launch` 는 흐름처럼 켜고 로그인(`--company` 업체코드만 바꿈 — 값은 명령줄에만). `--survey-only --deep N` 상품별 판정·두 길 견주기만 / `--requery 앞 뒤` 상품을 바꿀 때 하단이 언제 바뀌나 / `--find-check 상품` 제품 `find_code`(포커스 확인 포함). 결과는 `CONTROLS.md` "찾기(Ctrl+F) 창·조회 로딩 창". 지울 대상(승인 뒤) |
 | `test_open_screen.py` | **물류 화면 열기만** (09-29, 저장 없음) — `--screen wait` [일반]→[조회] / `stock` 재고검토→[조회] / `logistics` [등록(I)]. `--count` 는 흐름과 같은 함수로 전표 수를 센다(스크롤만) |
 | `test_collect.py` | 수집 RPA. `--check` / `--sms-only` / `--dry-run` |
 | `test_full.py` | 통합 흐름 콘솔 실행. `--modules orders,logistics` 로 기능 선택. `--company` 업체코드만 바꿔 로그인(시험 계정, 10-08). 업체 빌드는 `RPA_CUSTOMER=<id>` 와 `--modules cx_…`. 끝나면 창과 같은 리포트(`logs/report_*.html`) |
@@ -183,7 +182,8 @@
 
 지운 도구(주석·옛 문서에 이름이 남아 있다): 09-18 에 29개 — `docs/archive/HANDOFF_20260928.md` "09-18 — 개발 환경 정리" /
 09-29 에 `test_sales_menu.py` (선택주문 매출처리 결과 창 문구를 실기로 확인해 끝남) /
-10-06 에 옛 판 정리 — 기능별 빌드(`build_collect/erpia/full`·`build_run.bat`)·진입점(`main.py`·`main_collect/erpia/full.py`)·런처(`gui/launcher.py`·`run.bat`·`run_admin.bat`)·기능별 창(`gui/collect_app.py`·`full_app.py`)·설정 샘플, 문서 `REQUIREMENTS.md`·`PROCESS.md`.
+10-06 에 옛 판 정리 — 기능별 빌드(`build_collect/erpia/full`·`build_run.bat`)·진입점(`main.py`·`main_collect/erpia/full.py`)·런처(`gui/launcher.py`·`run.bat`·`run_admin.bat`)·기능별 창(`gui/collect_app.py`·`full_app.py`)·설정 샘플, 문서 `REQUIREMENTS.md`·`PROCESS.md` /
+10-08 에 `test_find_jump.py` (찾기·[조회] 로딩 측정 — 결과는 `CONTROLS.md` "찾기(Ctrl+F) 창·조회 로딩 창").
 
 ---
 
