@@ -99,6 +99,18 @@
         ]
       }
     ],
+    "Elicitation": [
+      {
+        "matcher": "supabase-rw",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/sql_elicit.py\""
+          }
+        ]
+      }
+    ],
+
     "SessionEnd": [
       {
         "matcher": "",

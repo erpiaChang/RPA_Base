@@ -50,7 +50,7 @@
 | 웹 (`web/`) | `probe_web` 70 · `probe_web_shot` 23 (찍어서 본다) — **필수** |
 | LLM 워커 (`llm/`) | `probe_llm` 42 — **필수** (속도·답은 `python llm\worker.py --bench`) |
 | 켜기 (`utils/autostart.py`·`utils/instance.py`·`utils/crashlog.py`·`utils/selfcheck.py`·`main_run.py`·`collect/pw_driver.py`·`build_run.spec`) | `probe_startup` 39 — **필수** (빌드 뒤 `--exe --browser`) |
-| 훅 (`.claude/hooks`) | `probe_hooks` 134 — **필수** |
+| 훅 (`.claude/hooks`) | `probe_hooks` 143 — **필수** |
 | 업체 전용 끼움 자리 (`config/customer.py`·`modules`·`full_flow`·`remote`·업체 칸) · 업체 패키지 (git 밖 `customers/`) | `probe_customer` 47 — **필수** (가짜 업체) · 업체마다 git 밖 `tools.local.probe_customer_<id>` |
 | 커밋·push (git 에 실값이 없나) | `probe_leaks --selftest` 44 · 인자 없이 걸린 줄 0 — 커밋 전·push 전 훅이 `--staged`·`--pre-push` 로 돈다 |
 
@@ -148,7 +148,8 @@ VS Code에서 실행할 때도 인터프리터가 `.venv`인지 확인한다.
 - **서버 연동 도구** (09-22, `docs/SERVER_PLAN.md`): Supabase MCP 는 `.mcp.json` 의 `supabase-rw` 하나다 (09-28 사용자가 `supabase-ro` 를 빼고 넣음) — 읽기 도구는 그냥 쓰고,
   **SQL 은 직접 적용한다 (사용자 확정 09-28)** — 단, **적용 전에 SQL 을 보여 주고
   사용자의 결정을 받은 뒤** 본문 첫 줄에 `-- APPROVED-SQL: <사유>` 를 붙인다. `.claude/hooks/guard_sql.py` 가
-  `execute_sql`·`apply_migration` 에서 이것을 강제한다(서브에이전트는 붙여도 막힘). 파괴적 도구(프로젝트 일시정지·브랜치·Edge 배포)는
+  `execute_sql`·`apply_migration` 에서 이것을 강제한다(서브에이전트는 붙여도 막힘). `DROP` 이 든 SQL 은 MCP 가 확인 창을 요청하는데
+  VS Code 확장은 그 창을 못 띄워 거절된다 — Elicitation 훅 `sql_elicit.py` 가 guard_sql 이 남긴 1회용 표(60초)로 답한다 (10-08). 파괴적 도구(프로젝트 일시정지·브랜치·Edge 배포)는
   settings 에서 거부. 스키마 원본은 늘 `server/schema.sql` 이다 (스킬 `server-sql`). 플러그인 `claude-security` 는 `/claude-security` 로 ②·③ 코드를 스캔한다 — 리포트
   폴더(`CLAUDE-SECURITY-*`)는 반영 뒤 지운다. `supabase db push`·`psql`·`wrangler deploy`(`npx wrangler@4 deploy` 포함)·실서버 `curl`·`git push`·`git remote add/set-url`·`gh repo create`·`--no-verify` 는 `APPROVED-RUN` 이 필요하다.
   웹 배포는 `deploy_web.bat`(사용자) 또는 `.venv\Scripts\python.exe -m tools.build_web` 뒤 `cd web && npx wrangler@4 deploy` — 둘 다 `# APPROVED-RUN: ...`(Claude, 09-28 / 10-02 build_web 먼저).

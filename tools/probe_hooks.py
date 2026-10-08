@@ -218,6 +218,52 @@ def run_hook(name: str, who: dict, tool: str, tool_input) -> int:
     return result.returncode
 
 
+TICKET = ROOT / "logs" / "_sql_ticket.json"
+PROJECT = "proj0test"
+SQL_OK = {"project_id": PROJECT, "query": "-- APPROVED-SQL: 시험\ndrop function if exists f()"}
+
+
+def elicit(who: dict, message: str) -> str:
+    payload = {"hook_event_name": "Elicitation", "mcp_server_name": "supabase-rw", "mode": "form",
+               "message": message, "requested_schema": {"type": "object", "properties": {}}, **who}
+    result = subprocess.run(
+        [sys.executable, str(HOOKS / "sql_elicit.py")],
+        input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        capture_output=True, cwd=ROOT, timeout=30,
+        env={**__import__("os").environ, "CLAUDE_PROJECT_DIR": str(ROOT)},
+    )
+    try:
+        return json.loads(result.stdout)["hookSpecificOutput"]["action"]
+    except (ValueError, KeyError, TypeError):
+        return f"exit {result.returncode}"
+
+
+def elicit_cases() -> list[tuple[str, bool]]:
+    """표가 있을 때만·한 번만·같은 프로젝트·메인만·60초 안에만 수락 (10-08). 끝나면 표를 지운다."""
+    msg = f"This SQL includes destructive operations. Run it on project {PROJECT}?"
+    out = []
+    try:
+        TICKET.unlink(missing_ok=True)
+        out.append(("표 없음 → 거절", elicit(MAIN, msg) == "decline"))
+        run_hook("guard_sql.py", MAIN, "mcp__supabase-rw__execute_sql", SQL_OK)
+        out.append(("메인 승인 SQL → 표 남김", TICKET.exists()))
+        out.append(("표 있음·같은 프로젝트 → 수락", elicit(MAIN, msg) == "accept"))
+        out.append(("한 번 쓰면 지운다 → 다음은 거절", elicit(MAIN, msg) == "decline"))
+        run_hook("guard_sql.py", MAIN, "mcp__supabase-rw__execute_sql", SQL_OK)
+        out.append(("다른 프로젝트 → 거절", elicit(MAIN, msg.replace(PROJECT, "other")) == "decline"))
+        run_hook("guard_sql.py", MAIN, "mcp__supabase-rw__execute_sql", SQL_OK)
+        out.append(("서브에이전트의 확인 창 → 거절", elicit(GENERAL, msg) == "decline"))
+        TICKET.write_text(json.dumps({"at": 0, "project_id": PROJECT}), encoding="utf-8")
+        out.append(("오래된 표 → 거절", elicit(MAIN, msg) == "decline"))
+        run_hook("guard_sql.py", GENERAL, "mcp__supabase-rw__execute_sql", SQL_OK)
+        out.append(("서브에이전트 승인 SQL → 표 없음", not TICKET.exists()))
+        run_hook("guard_sql.py", MAIN, "mcp__supabase-rw__execute_sql", {"project_id": PROJECT, "query": "drop table t"})
+        out.append(("승인 없는 SQL → 표 없음", not TICKET.exists()))
+    finally:
+        TICKET.unlink(missing_ok=True)
+    return out
+
+
 def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     passed = failed = 0
@@ -233,6 +279,11 @@ def main() -> int:
             label = who.get("agent_type", "main")
             shown = str(command).replace("\n", "⏎")
             print(f"  {'통과' if ok else '실패'}  exit {got} (기대 {want})  {label}/{tool}  {shown}")
+    print("▶ sql_elicit.py (guard_sql 의 표로 MCP 확인 창에 답한다)")
+    for label, ok in elicit_cases():
+        passed += ok
+        failed += not ok
+        print(f"  {'통과' if ok else '실패'}  {label}")
     print("▶ check_rpa_rules.py")
     for index, (source, want) in enumerate(RULE_CASES):
         path = ROOT / "logs" / f"_probe_rules_{index}.py"
