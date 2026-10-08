@@ -41,7 +41,7 @@ for _stream in (sys.stdout, sys.stderr):
         continue
 
 from automation import logistics_wait  # noqa: E402
-from utils import ui, winprobe  # noqa: E402
+from utils import dialogs, ui, winprobe  # noqa: E402
 from utils.logger import get_logger, setup_logging  # noqa: E402
 
 log = get_logger(__name__)
@@ -185,6 +185,87 @@ def check_new_wait() -> list[bool]:
         spent = time.monotonic() - started
         out.append(check("주문이 없으면 상한 20초를 다 쓰지 않는다",
                          2.0 <= spent < 5.0, f"{spent:.2f}초에 확정"))
+    return out
+
+
+class _FakeLoading:
+    """`logistics_wait.Loading` 대신 — 덮개·바쁨을 부를 때마다 목록 앞에서 하나씩 꺼낸다 (다 쓰면 없음)."""
+
+    def __init__(self, covers=(), busies=()):
+        self.covers, self.busies = list(covers), list(busies)
+        self.handle = 1
+
+    def covering(self, rect) -> bool:
+        return self.covers.pop(0) if self.covers else False
+
+    def busy(self) -> bool:
+        return self.busies.pop(0) if self.busies else False
+
+
+def check_wait_rows() -> list[bool]:
+    """[조회] 완료 판정 (10-07 실측: 덮개가 사라진 0.26초 뒤에도 0행, 1초 안에 행) — 0행을 바로 믿지 않는다."""
+    log.info("▶ [조회] 완료 판정 — 0행은 조용한 시간이 이어질 때만 (10-07)")
+    out = []
+    lw = logistics_wait
+    real = (ui.visible_row_count, ui.rect_of, lw.ZERO_ROWS_QUIET, winprobe.child_windows)
+
+    def rows_by_time(*steps):
+        """(초, 행 수) — 그 시각이 지나면 그 행 수. 시작부터 잰다."""
+        started = time.monotonic()
+
+        def count(grid):
+            spent = time.monotonic() - started
+            return next((n for at, n in reversed(steps) if spent >= at), 0)
+        return count
+
+    def run(count, loading=None, timeout=20.0):
+        ui.visible_row_count = count
+        started = time.monotonic()
+        rows = lw._wait_rows(object(), "가짜 그리드", timeout=timeout, loading=loading)
+        return rows, time.monotonic() - started
+
+    try:
+        ui.rect_of = lambda grid: (0, 0, 100, 100)
+        lw.ZERO_ROWS_QUIET = 1.5          # 확인 시간을 줄인다 — 늦게 붙는 행(1초)보다 넉넉한 것은 실물과 같다
+        rows, spent = run(rows_by_time((0.0, 0), (1.0, 5)))
+        out.append(check("★ 조회 직후 0행이다가 1초 뒤 행이 붙으면 그 행을 기다린다 (예전 판정은 0.6초에 0)",
+                         rows == 5 and spent < 3.0, f"{rows}행, {spent:.2f}초"))
+        rows, spent = run(rows_by_time((0.0, 0), (2.5, 5)), _FakeLoading(covers=[False] + [True] * 6))
+        out.append(check("★ 0행 → 덮개 → 0행 → 행 (실측 순서) — 덮개 동안은 0행 유예를 세지 않는다",
+                         rows == 5, f"{rows}행, {spent:.2f}초"))
+        rows, spent = run(rows_by_time((0.0, 8), (1.0, 3)), _FakeLoading(covers=[True] * 4))
+        out.append(check("★ 덮개가 떠 있는 동안 보이는 옛 행(8)은 세지 않는다 → 덮개 뒤 3행",
+                         rows == 3, f"{rows}행, {spent:.2f}초"))
+        rows, spent = run(lambda grid: 0)
+        out.append(check("진짜 빈 결과는 조용한 시간 뒤 0행 — 상한(20초)을 다 쓰지 않는다",
+                         rows == 0 and lw.ZERO_ROWS_QUIET <= spent < lw.ZERO_ROWS_QUIET + 1.5, f"{spent:.2f}초"))
+        rows, spent = run(lambda grid: 0, _FakeLoading(busies=[True] * 5))
+        out.append(check("ERPia 가 바쁜 동안은 0행 유예를 세지 않는다",
+                         rows == 0 and spent >= lw.ZERO_ROWS_QUIET + 1.0, f"{spent:.2f}초"))
+        rows, spent = run(lambda grid: 5, _FakeLoading(busies=[True] * 1000))
+        out.append(check("★ 바쁨이 계속돼도(느린 PC 오탐) 행이 보이면 끝난다 — 바쁨은 0행에만 쓴다",
+                         rows == 5 and spent < 2.0, f"{rows}행, {spent:.2f}초"))
+        rows, spent = run(lambda grid: 7, _FakeLoading(covers=[True] * 1000), timeout=1.0)
+        out.append(check("★ 덮개가 끝내 안 사라지면 상한에서 멈추고 마지막으로 읽은 행 수를 준다 (0 이 아니다)",
+                         rows == 7 and 1.0 <= spent < 2.5, f"{rows}행, {spent:.2f}초"))
+
+        # 덮개 판정 — 누르기 전 기준선에 없던 창이 그리드를 절반 넘게 덮을 때만
+        grid_rect = (0, 0, 1000, 300)
+        windows = {10: grid_rect, 11: (0, 0, 1000, 600)}
+        winprobe.child_windows = lambda handle: dict(windows)
+        loading = lw.Loading.__new__(lw.Loading)
+        loading.handle, loading.base = 1, set(windows)
+        out.append(check("기준선에 있던 창(그리드 자신·부모 패널)은 덮개가 아니다",
+                         loading.covering(grid_rect) is False))
+        windows[20] = (990, 0, 1007, 300)                   # 새로 생긴 스크롤바 (1% 남짓)
+        out.append(check("새로 생긴 작은 창(스크롤바)은 덮개가 아니다", loading.covering(grid_rect) is False))
+        windows[21] = (0, 0, 1000, 300)                     # 그리드와 같은 크기 (10-07 실측 모양)
+        out.append(check("★ 새로 생겨 그리드를 덮는 창은 덮개다", loading.covering(grid_rect) is True))
+        loading.handle = 0
+        out.append(check("메인 창 핸들을 못 얻었으면 덮개를 보지 않는다 (조용한 시간만으로)",
+                         loading.covering(grid_rect) is False and loading.busy() is False))
+    finally:
+        ui.visible_row_count, ui.rect_of, lw.ZERO_ROWS_QUIET, winprobe.child_windows = real
     return out
 
 
@@ -365,6 +446,341 @@ def check_sorted_scan() -> list[bool]:
     return out
 
 
+class _Box:
+    """`rectangle()` 의 높이만 흉내낸다."""
+
+    def __init__(self, height: int):
+        self._height = height
+
+    def rectangle(self):
+        return self
+
+    def height(self) -> int:
+        return self._height
+
+
+def check_find_jump() -> list[bool]:
+    """찾기(Ctrl+F)로 묶음까지 건너뛰기 (10-07) — 맨 위부터 FIND_AFTER_PAGES 장을 읽고도 없을 때만, 못 하면 맨 위부터."""
+    log.info("▶ 찾기로 묶음까지 건너뛰기 (10-07)")
+    out = []
+    lw = logistics_wait
+    # 200행, 한 화면 20행. far: B 가 101~115 (6장째) / near: B 가 41~55 (3장째 — 데이터 많은 계정 실측 모양)
+    far = {n: "A" if n <= 100 else "B" if n <= 115 else "C" for n in range(1, 201)}
+    near = {n: "A" if n <= 40 else "B" if n <= 55 else "C" for n in range(1, 201)}
+    real = {name: getattr(lw, name) for name in ("find_code", "_worth_finding")}
+    calls: list = []
+
+    def jump_to_b(grid, code, pid):          # 101행이 보이게 화면을 옮긴 모양 (실측: 윗행이 보인다)
+        calls.append(code)
+        grid.offset = 95
+        return 101, "A"
+
+    def jump_then_fail(grid, code, pid):     # 화면을 엉뚱한 데로 옮기고 시작을 확인하지 못했다
+        calls.append(code)
+        grid.offset = 150
+        return None
+
+    def run(code="B", pid=1, grouped=True, find=jump_to_b, worth=True, codes=far):
+        calls.clear()
+        lw.find_code = find
+        lw._worth_finding = lambda grid: worth
+        grid = FakeGrid(200)
+        with fake_sorted_grid(grid, codes, {}):
+            checked, _, _ = lw.check_matching_rows(grid, code, dry_run=True, pid=pid, grouped=grouped)
+        return checked, grid.pages, list(calls)
+
+    try:
+        checked, pages, called = run()
+        out.append(check("★ 3장을 읽고도 없고 아래가 많으면 찾기로 건너뛴다 (맨 위부터 6장 → 4장, 체크 15 그대로)",
+                         checked == 15 and pages == 4 and called == ["B"], f"체크 {checked}, 화면 {pages}, 찾기 {called}"))
+        checked, pages, called = run(codes=near)
+        out.append(check("★ 묶음이 3장 안에 있으면 찾지 않는다 (실측 모양 — 찾기가 더 느리다)",
+                         checked == 15 and pages == 3 and not called, f"체크 {checked}, 화면 {pages}, 찾기 {called}"))
+        checked, pages, called = run(worth=False)
+        out.append(check("아래가 적으면(찾기가 더 느리면) 찾지 않고 내려 읽는다",
+                         checked == 15 and pages == 6 and not called, f"체크 {checked}, 화면 {pages}, 찾기 {called}"))
+        checked, pages, called = run(find=lambda g, c, p: calls.append(c))
+        out.append(check("찾기가 안 되면 맨 위부터 다시 끝까지 — 빠지는 행 없음",
+                         checked == 15 and pages == 8 and called == ["B"], f"체크 {checked}, 화면 {pages}"))
+        checked, pages, called = run(find=jump_then_fail)
+        out.append(check("★ 찾기가 화면을 옮겨 놓고 실패해도 맨 위부터 다시 센다 (옮겨진 데서 이어 읽지 않는다)",
+                         checked == 15 and called == ["B"], f"체크 {checked}, 화면 {pages}"))
+        checked, pages, called = run(pid=None)
+        out.append(check("pid 가 없으면(확인 도구의 가짜 그리드 포함) 찾기를 부르지 않는다",
+                         checked == 15 and pages == 6 and not called, f"찾기 {called}"))
+        checked, pages, called = run(grouped=False)
+        out.append(check("정렬을 확인 못 했으면 찾지 않는다 (건너뛴 위쪽에 없다는 근거가 정렬이다)",
+                         checked == 15 and not called, f"찾기 {called}"))
+        checked, pages, called = run(code="A")
+        out.append(check("첫 화면에 그 코드가 있으면 찾지 않는다", checked == 100 and not called, f"찾기 {called}"))
+
+        # 보류 확인도 같은 자리에서 건너뛴다
+        lw.find_code, lw._worth_finding = jump_to_b, (lambda grid: True)
+        calls.clear()
+        grid = FakeGrid(200)
+        with fake_sorted_grid(grid, far, {n: "1" for n in range(101, 116)}):
+            result = lw.verify_holds(grid, {"B": 15}, grouped=True, pid=1)
+        out.append(check("★ 보류 확인도 3장 뒤 찾기로 건너뛴다",
+                         result["short"] == {} and grid.pages == 3 and calls == ["B"],
+                         f"부족 {result['short']}, 화면 {grid.pages}, 찾기 {calls}"))
+    finally:
+        for name, func in real.items():
+            setattr(lw, name, func)
+
+    out += _check_group_start()
+    out += _check_worth_finding()
+    out += _check_find_code()
+    out += _check_type_find()
+    return out
+
+
+def _check_group_start() -> list[bool]:
+    """찾기로 간 화면에서 묶음 시작 확인 — 정확히 같은 첫 행 + 그 윗행(다른 코드)."""
+    out = []
+    lw = logistics_wait
+    codes = {n: "A" if n <= 40 else "B" if n <= 55 else "C" for n in range(1, 61)}
+    real = (ui.column_values, ui.scroll_up_line)
+    grid = FakeGrid(60)
+    try:
+        ui.column_values = lambda g, column: {r.number: codes.get(r.number, "") for r in g.visible()}
+
+        def line_up(g):
+            if g.offset == 0:
+                return False
+            g.offset -= 1
+            return True
+
+        ui.scroll_up_line = line_up
+        for offset, code, want, name in (
+            (35, "B", (41, "A"), "윗행(40, A)이 보이면 그 행이 묶음 시작"),
+            (40, "B", (41, "A"), "첫 일치 행이 맨 위면 한 줄 올려 윗행을 보고 확인한다"),
+            (45, "B", None, "★ 묶음 가운데로 갔으면(한 줄 올려도 윗행이 같은 코드) 시작을 확인 못 한다 → None"),
+            (0, "A", (1, None), "1행이 일치하면 1행이 시작"),
+            (0, "Z", None, "정확히 같은 행이 없으면(일부만 같은 곳으로 갔다) None"),
+        ):
+            grid.offset = offset
+            got = lw._group_start(grid, code)
+            out.append(check(name, got == want, f"{got}"))
+    finally:
+        ui.column_values, ui.scroll_up_line = real
+    return out
+
+
+def _check_worth_finding() -> list[bool]:
+    """찾기를 쓸 가치 — 스크롤바 '페이지 아래로' ÷ 썸 높이 = 아래 남은 화면 × 페이지 비용 > 찾기 비용."""
+    out = []
+    lw = logistics_wait
+    real = (ui.vertical_scrollbar, ui.scrollbar_button, ui.find_all)
+    try:
+        def bar(below, thumb):
+            ui.vertical_scrollbar = lambda g: object()
+            ui.scrollbar_button = lambda g, names, bar=None: None if below is None else _Box(below)
+            ui.find_all = lambda parent, control_type=None, title_re=None: [_Box(thumb)] if thumb else []
+
+        bar(202, 171)                       # 10-07 실측 (36행·한 화면 18행 → 1.2장)
+        out.append(check("아래가 1.2장뿐이면(실측 모양) 찾지 않는다 — 남은 장 × 페이지 비용 < 찾기 비용",
+                         lw._worth_finding(object()) is False, f"{lw._pages_below(object()):.2f}장"))
+        bar(271, 102)                       # 데이터 많은 계정 실측 (61행 → 2.7장)
+        out.append(check("아래가 2.7장이어도(데이터 많은 계정 61행) 찾지 않는다", lw._worth_finding(object()) is False,
+                         f"{lw._pages_below(object()):.2f}장"))
+        bar(600, 100)
+        out.append(check("아래가 6장이면 찾는다", lw._worth_finding(object()) is True))
+        bar(None, 171)
+        out.append(check("맨 아래(페이지 아래로 없음)면 찾지 않는다 — 그 코드는 이 하단에 없다",
+                         lw._worth_finding(object()) is False))
+        bar(300, None)
+        out.append(check("썸을 못 읽으면 찾는다 (아래가 있다는 것은 안다)", lw._worth_finding(object()) is True))
+        ui.vertical_scrollbar = lambda g: None
+        out.append(check("스크롤바가 없으면(한 화면) 찾지 않는다", lw._worth_finding(object()) is False))
+    finally:
+        ui.vertical_scrollbar, ui.scrollbar_button, ui.find_all = real
+    return out
+
+
+class _FakeMain:
+    """ERPia 메인 창 — Ctrl+F 를 받으면 찾기 창이 뜬다 (`late` 면 창 목록을 그만큼 더 읽은 뒤에)."""
+
+    def __init__(self, windows: dict, late: int = 0):
+        self.handle, self.windows, self.keys, self.late = 100, windows, [], late
+
+    def type_keys(self, keys, set_foreground=True):
+        self.keys.append(keys)
+        if keys == "^f" and not self.late:
+            self.windows[200] = logistics_wait.FIND_TITLE
+
+
+class _FakeFindGrid:
+    def __init__(self, main):
+        self.main = main
+
+    def top_level_parent(self):
+        return self.main
+
+
+def _check_find_code() -> list[bool]:
+    """찾기 본체 — 맨 앞 창 확인·늘 닫기·실패하면 None. 실제 창·키는 쓰지 않는다 (전부 가짜)."""
+    from utils.cancel import Cancelled
+
+    out = []
+    lw = logistics_wait
+    real_ui = (ui.grid_rows, ui.cell, ui.click, ui.bring_forward)
+    real_lw = (lw._type_find, lw._group_start, lw.FIND_OPEN_TIMEOUT, lw.FIND_CLOSE_TIMEOUT)
+    real_wp = (winprobe.top_windows, winprobe.focus_handle, winprobe.is_within, winprobe.ui_roundtrip)
+    real_close = dialogs.post_close
+
+    def run(foreground=True, focused=True, typed=True, code="B01", late=0, stuck=False, leftover=False):
+        windows = {100: "comp01 - user01"}
+        if leftover:
+            windows[250] = lw.FIND_TITLE                   # 앞서 남은 찾기 창
+        main = _FakeMain(windows, late)
+        closed: list = []
+        clicks: list = []
+        columns: list = []
+
+        def top_windows(pid=None, visible_only=True):
+            if main.late and main.keys:                     # Ctrl+F 뒤 목록을 `late` 번 더 읽어야 뜬다
+                main.late -= 1
+                if not main.late:
+                    windows[200] = lw.FIND_TITLE
+            return [winprobe.Window(h, "WindowsForms10", t, 7, True) for h, t in windows.items()]
+
+        winprobe.top_windows = top_windows
+        winprobe.focus_handle = lambda handle: 500
+        winprobe.is_within = lambda child, ancestor: focused
+        # 늦게 뜨는 창은 ERPia 가 밀려 있을 때 생긴다 — 창이 뜰 때까지 바쁘다
+        winprobe.ui_roundtrip = lambda handle, timeout=1.0: 0.01 if main.late else 0.0001
+        ui.grid_rows = lambda g: [FakeRow(1)]
+        ui.cell = lambda row, column, timeout=None: columns.append(column) or "코드 칸"
+        ui.click = lambda ctrl, what, **k: clicks.append(what) or "클릭"
+        ui.bring_forward = lambda ctrl, what: foreground
+
+        def type_find(finder, c, grid, pid, before):
+            if isinstance(typed, BaseException):
+                raise typed
+            if typed == "done":
+                windows[300] = lw.FIND_DONE_TITLE
+            return typed is True
+
+        def post_close(handle):
+            closed.append(handle)
+            if not stuck:
+                windows.pop(handle, None)
+
+        lw._type_find, dialogs.post_close = type_find, post_close
+        lw._group_start = lambda grid, c: (41, "A")
+        lw.FIND_OPEN_TIMEOUT, lw.FIND_CLOSE_TIMEOUT = 0.3, 0.5
+        try:
+            got = lw.find_code(_FakeFindGrid(main), code, 7)
+        except BaseException as exc:          # noqa: BLE001 — 취소·멈춤이 그대로 올라오는지 본다
+            got = exc
+        return got, main.keys, sorted(set(closed)), clicks, columns
+
+    try:
+        got, keys, closed, clicks, columns = run()
+        out.append(check("찾기 성공 → 묶음 시작, 찾기 창은 닫는다", got == (41, "A") and keys == ["^f"]
+                         and closed == [200], f"{got} / 키 {keys} / 닫음 {closed}"))
+        out.append(check("포커스는 하단 'ERP상품코드' 칸을 눌러 준다 (행 가운데는 다른 컬럼이다)",
+                         columns == [lw.BOTTOM_CODE_COLUMN] and len(clicks) == 1, f"{columns} / {clicks}"))
+        got, keys, closed, clicks, _ = run(foreground=False)
+        out.append(check("★ ERPia 가 맨 앞이 아니면 아무것도 누르지 않는다 (클릭도 Ctrl+F 도)",
+                         got is None and keys == [] and clicks == [], f"키 {keys} / 클릭 {clicks}"))
+        got, keys, closed, clicks, _ = run(focused=False)
+        out.append(check("★ 키보드 포커스가 하단 그리드에 없으면 Ctrl+F 를 보내지 않는다 (상단 찾기가 열린다)",
+                         got is None and keys == [], f"키 {keys}"))
+        got, keys, closed, clicks, _ = run(late=6)
+        out.append(check("★ 찾기 창이 늦게 떠도(여는 대기 뒤) 닫는다 — 남겨 두지 않는다",
+                         got is None and closed == [200], f"{got} / 닫음 {closed}"))
+        got, keys, closed, clicks, _ = run(stuck=True)
+        out.append(check("★ 찾기 창이 끝내 안 닫히면 멈춘다 (가려진 채 계속 누르지 않는다)",
+                         isinstance(got, lw.ScreenError), f"{type(got).__name__}"))
+        got, keys, closed, clicks, _ = run(leftover=True)
+        out.append(check("앞서 남은 찾기 창이 있으면 먼저 닫고 찾는다",
+                         got == (41, "A") and closed == [200, 250], f"{got} / 닫음 {closed}"))
+        got, keys, closed, _, _ = run(typed=False)
+        out.append(check("이동이 안 되면 None (맨 위부터 훑는다) — 찾기 창은 닫는다",
+                         got is None and closed == [200], f"{got} / 닫음 {closed}"))
+        got, keys, closed, _, _ = run(typed="done")
+        out.append(check("없는 값('완료' 알림)이면 None — 알림과 찾기 창을 둘 다 닫는다",
+                         got is None and sorted(closed) == [200, 300], f"닫음 {closed}"))
+        got, keys, closed, _, _ = run(typed=RuntimeError("UIA 오류"))
+        out.append(check("중간에 오류가 나도 None — 찾기 창은 닫는다", got is None and closed == [200],
+                         f"{got} / 닫음 {closed}"))
+        got, keys, closed, _, _ = run(typed=Cancelled())
+        out.append(check("★ [중단](취소)이면 그대로 올라가되 찾기 창 닫기는 보낸다",
+                         isinstance(got, Cancelled) and closed == [200], f"{type(got).__name__} / 닫음 {closed}"))
+        got, keys, closed, _, _ = run(code="A+1")
+        out.append(check("키 특수문자가 든 코드는 찾지 않는다 (아무것도 누르지 않는다)",
+                         got is None and keys == [] and closed == [], f"키 {keys}"))
+    finally:
+        ui.grid_rows, ui.cell, ui.click, ui.bring_forward = real_ui
+        lw._type_find, lw._group_start, lw.FIND_OPEN_TIMEOUT, lw.FIND_CLOSE_TIMEOUT = real_lw
+        winprobe.top_windows, winprobe.focus_handle, winprobe.is_within, winprobe.ui_roundtrip = real_wp
+        dialogs.post_close = real_close
+    return out
+
+
+class _FakeEdit:
+    def __init__(self):
+        self.keys: list = []
+
+    def type_keys(self, keys, set_foreground=True):
+        self.keys.append(keys)
+
+
+class _FakeDesktop:
+    """`pywinauto.Desktop` 대신 — window(handle=).wrapper_object() 가 가짜 찾기 창."""
+
+    def __init__(self, backend=None):
+        pass
+
+    def window(self, handle=None):
+        return self
+
+    def wrapper_object(self):
+        return self
+
+    handle = 200
+
+    def set_focus(self):
+        return self
+
+
+def _check_type_find() -> list[bool]:
+    """찾기 창에 입력 — 맨 앞이 찾기 창일 때만 키, '완료'·정확 일치 판정 (가짜 창)."""
+    import pywinauto
+
+    out = []
+    lw = logistics_wait
+    real = (pywinauto.Desktop, ui.find, ui.wait_foreground, ui.column_values, winprobe.top_windows,
+            lw.FIND_JUMP_TIMEOUT)
+
+    def run(foreground=True, visible=("A01",), done=False):
+        edit = _FakeEdit()
+        pywinauto.Desktop = _FakeDesktop
+        ui.find = lambda parent, **k: edit
+        ui.wait_foreground = lambda window, what: foreground
+        ui.column_values = lambda grid, column: dict(enumerate(visible, 1)) if edit.keys else {1: "A01"}
+        windows = [winprobe.Window(300, "WindowsForms10", lw.FIND_DONE_TITLE, 7, True)] if done else []
+        winprobe.top_windows = lambda pid=None, visible_only=True: windows if edit.keys else []
+        lw.FIND_JUMP_TIMEOUT = 0.5
+        return lw._type_find(200, "B01", object(), 7, set()), edit.keys
+
+    try:
+        got, keys = run(foreground=False)
+        out.append(check("★ 찾기 창이 맨 앞이 아니면 코드+Enter 를 보내지 않는다", got is False and keys == [],
+                         f"{got} / 키 {keys}"))
+        got, keys = run(visible=("A01", "B01"))
+        out.append(check("코드가 보이면 도착", got is True and keys == ["^aB01{ENTER}"], f"{got} / 키 {keys}"))
+        got, keys = run(done=True)
+        out.append(check("'완료' 알림이면 없는 값 — 도착 아님", got is False, f"{got}"))
+        got, keys = run(visible=("XB01", "B012"))
+        out.append(check("일부만 같은 코드(XB01·B012)만 보이면 도착이 아니다 (정확히 같아야)", got is False, f"{got}"))
+    finally:
+        (pywinauto.Desktop, ui.find, ui.wait_foreground, ui.column_values, winprobe.top_windows,
+         lw.FIND_JUMP_TIMEOUT) = real
+    return out
+
+
 class _FakeHeader:
     def __init__(self, action):
         self.action = action
@@ -502,37 +918,69 @@ def check_slip_counts() -> list[bool]:
                      found == (2, True) and calls == ["전표번호", "home"], str(calls)))
 
     # 저장 — 넘긴 수 = 저장 전후 전표 차이 (8행 = 전표 2, 09-29 실측 모양)
-    def save(slip_counts):
-        rows = iter([8, 0])
+    class SavingMark:
+        """`Loading` 대신 — 만들어지는 순간을 기록한다."""
+        handle = 0
+        record: list = []
+
+        def __init__(self, screen):
+            SavingMark.record.append("저장 기준선")
+
+    def save(slip_counts, many=False, rows_seq=(8, 0), visible=0):
+        rows = iter(rows_seq)
         slips = iter(slip_counts)
         names = ("activate_tab", "click_search", "_general_grid", "_wait_rows",
-                 "count_general_slips", "_screen_pid", "process_handle")
+                 "count_general_slips", "_screen_pid", "process_handle", "Loading", "SAVE_IDLE_GRACE")
         real = {name: getattr(lw, name) for name in names}
-        real_ui = (ui.header_select_all, ui.find, ui.click, ui.visible_row_count)
+        real_ui = (ui.header_select_all, ui.find, ui.click, ui.visible_row_count, ui.has_hidden_rows)
         info: dict = {}
+        record = SavingMark.record
+        record.clear()
         try:
             lw.activate_tab = lambda s, name: None
-            lw.click_search = lambda s: None
+            lw.click_search = lambda s: "조회 기준선"
             lw._general_grid = lambda s: object()
-            lw._wait_rows = lambda g, what, timeout=None: next(rows)
+            lw._wait_rows = lambda g, what, timeout=None, loading=None: record.append(loading) or next(rows)
             lw.count_general_slips = lambda g: next(slips)
             lw._screen_pid = lambda s: None
             lw.process_handle = lambda pid: 0
+            lw.Loading, lw.SAVE_IDLE_GRACE = SavingMark, 0.2
             ui.header_select_all = lambda g, dry_run=False: "클릭"
             ui.find = lambda *a, **k: object()
-            ui.click = lambda *a, **k: "클릭"
-            ui.visible_row_count = lambda g: 0
+            ui.click = lambda ctrl, what, **k: record.append(what) or "클릭"
+            ui.visible_row_count = lambda g: visible
+            ui.has_hidden_rows = lambda g: many
             moved = lw.save_general(object(), info=info)
         finally:
             for name, func in real.items():
                 setattr(lw, name, func)
-            ui.header_select_all, ui.find, ui.click, ui.visible_row_count = real_ui
+            ui.header_select_all, ui.find, ui.click, ui.visible_row_count, ui.has_hidden_rows = real_ui
         return moved, info.get("exact")
 
     out.append(check("★ [일반] 8행 저장 → 넘긴 주문 2건 (행 차이 8 이 아니다), 정확",
                      save([(2, True), (0, True)]) == (2, True), str(save([(2, True), (0, True)]))))
+    wiring = list(SavingMark.record)
+    out.append(check("★ [일반] [조회]·[저장] 의 로딩 기준선이 _wait_rows 로 넘어가고, 저장 기준선은 누르기 전에 잡는다",
+                     wiring[:3] == ["조회 기준선", "저장 기준선", "저장(S)"] and isinstance(wiring[3], SavingMark),
+                     str([w if isinstance(w, str) else type(w).__name__ for w in wiring])))
     out.append(check("전표 수를 모르면 행 차이는 '저장됨' 표시일 뿐 — 정확하지 않다고 알린다",
                      save([(None, False), (0, True)]) == (8, False)))
+    got = save([(9, True), (7, True)], many=True, rows_seq=(18, 18), visible=18)
+    out.append(check("★ [일반] 이 한 화면을 넘으면 보이는 행 수(18 그대로)로 '0건' 이라 하지 않고 전표를 다시 센다 (9→7 = 2)",
+                     got == (2, True), str(got)))
+
+    # [조회] 기준선은 누르기 전에 잡는다 (누른 뒤면 덮개가 기준선에 들어가 덮개를 못 본다)
+    order: list = []
+    real_c = (ui.find, ui.click, lw.Loading)
+    try:
+        ui.find = lambda *a, **k: object()
+        ui.click = lambda ctrl, what, **k: order.append(what) or "클릭"
+        lw.Loading = lambda screen: order.append("기준선") or "기준선"
+        mark = lw.click_search(object())
+    finally:
+        ui.find, ui.click, lw.Loading = real_c
+    out.append(check("★ click_search — 기준선을 [조회] 누르기 전에 잡아 돌려준다",
+                     order == ["기준선", "조회(F)"] and mark == "기준선", str(order)))
 
     # 보류 — 부족 상품 둘이 같은 전표에 있으면 주문은 한 번만. 번호를 못 읽은 행은 행마다 자리표(`?상품:행`)
     held = [{"code": "A", "slips": ["OT1", "OT2"], "checked": 2},
@@ -663,9 +1111,11 @@ def main() -> int:
                              rows_are_same, f"체크된 행 {marked}"))
 
     results += check_new_wait()
+    results += check_wait_rows()
     results += check_scroll_rule()
     results += check_no_menu()
     results += check_sorted_scan()
+    results += check_find_jump()
     results += check_ensure_sorted()
     results += check_slip_counts()
 

@@ -1996,6 +1996,22 @@ def _scroll_down_once(grid, method: str, before: set[int], bar=None) -> bool:
         return False
 
 
+SCROLL_LINE_UP_NAMES = ("위로 선", "Line up")
+
+
+def scroll_up_line(grid) -> bool:
+    """수직 스크롤바의 '위로 선' 을 한 번 누른다 (한 줄쯤 위로). 보이는 행 번호가 바뀌었으면 True.
+
+    찾기로 간 화면에서 첫 일치 행의 **윗행**을 보려고 쓴다 (10-07, `logistics_wait._group_start`).
+    """
+    before = visible_row_numbers(grid)
+    button = scrollbar_button(grid, SCROLL_LINE_UP_NAMES)
+    if not before or button is None or not _press_scrollbar(button, "스크롤바 한 줄 위로"):
+        return False
+    after = visible_row_numbers(grid)
+    return bool(after) and after != before
+
+
 def scroll_to_top(grid) -> bool:
     """그리드를 맨 위로 되돌린다. 성공 여부를 행 번호로 판정한다."""
     before = visible_row_numbers(grid)

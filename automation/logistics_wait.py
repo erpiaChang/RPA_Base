@@ -10,6 +10,7 @@ r"""물류대기 관리 화면 (Phase 8).
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 from pathlib import Path
@@ -116,6 +117,28 @@ BUSY_ROUNDTRIP = 0.001
 # 확정한다. 예전에는 상한(120초)을 통째로 썼다.
 SAVE_IDLE_ROUNDS = 6
 SAVE_IDLE_GRACE = 3.0
+
+# --- [조회] 완료 판정 (10-07 실측, docs/CONTROLS.md "찾기(Ctrl+F) 창·조회 로딩 창") -------------
+# [조회] 0.3초 뒤 그리드와 같은 크기의 자식 창(로딩 표시)이 0.82초 떴고, 사라진 0.26초 뒤에도 0행이었다가
+# 1초 안에 행이 붙었다. 그래서 덮개를 보고, 0행은 조용한 시간이 이어질 때만 믿는다.
+LOADING_COVER = 0.5      # 그리드 면적의 이 비율 이상을 덮는 **새** 자식 창 = 조회 중
+ZERO_ROWS_QUIET = 3.0    # 0행이 덮개 없이·한가하게 이만큼 이어져야 0행으로 확정한다 (초)
+
+# --- 찾기(Ctrl+F)로 하단 묶음까지 건너뛰기 (10-07 사용자 요청, docs/CONTROLS.md "찾기(Ctrl+F) 창·조회 로딩 창") ----
+# 찾기는 **포커스가 있는 컬럼**에서 포커스 행부터 아래로(끝에서 돌아) 찾고 **일부만 같아도** 간다 — 코드 칸을 눌러
+# 포커스를 주고, 간 뒤 정확히 같은 첫 행과 그 윗행(다른 코드)으로 묶음 시작을 확인한다. 못 하면 맨 위부터 훑는다.
+# 맨 위부터 FIND_AFTER_PAGES 장을 읽어도 그 코드가 없고 남은 화면이 많을 때만 찾는다 — 데이터 많은 계정 실측에서
+# 묶음은 늘 2~3장째에서 시작했고, 첫 화면에서 바로 찾으면 상품마다 3~4초 느렸다
+FIND_TITLE = "찾기"                 # 메인 창이 소유한 최상위 창 — Win32 로만 잡힌다 (Desktop(uia).windows() 는 놓친다)
+FIND_EDIT_ID = "txt_Key"
+FIND_DONE_TITLE = "완료"            # 없는 값을 찾으면 뜨는 알림 — 찾기 창과 같이 닫는다
+FIND_SAFE = re.compile(r"^[0-9A-Za-z_-]+$")   # 키로 보낼 코드 — type_keys 특수문자(^ % + ~ ( ) { })가 없을 때만
+FIND_OPEN_TIMEOUT = 3.0             # 창 열림·입력칸·코드 칸 찾기 (실측 0.13~0.19초)
+FIND_JUMP_TIMEOUT = 3.0             # 실측 이동 0.6초
+FIND_CLOSE_TIMEOUT = 3.0            # 실측 0.05초
+FIND_AFTER_PAGES = 3                # 맨 위부터 이만큼 읽고도 그 코드가 없을 때만 찾는다
+FIND_COST = 5.0                     # 찾기 3.7~4.0초 + 간 화면 다시 읽기 1.0초 (데이터 많은 계정 실측)
+PAGE_COST = 1.7                     # 한 장 내리기+네 컬럼 읽기 1.65~1.77초
 
 
 class ScreenError(RuntimeError):
@@ -230,15 +253,49 @@ def activate_tab(screen, name: str) -> None:
              methods=("Select", "클릭"))
 
 
-def click_search(screen) -> None:
-    """[조회(F)]. 조회조건은 화면 기본값 그대로 쓴다.
+class Loading:
+    """누르기 **전** ERPia 메인 창의 자식 창 기준선. 그 뒤 새로 생겨 그리드를 덮는 창이 로딩 표시다.
+
+    핸들을 못 얻으면(0) 덮개도 바쁨도 보지 않는다 — 행 수 안정과 0행 유예만으로 판정한다.
+    """
+
+    def __init__(self, screen):
+        try:        # 메인 창 — '제목 있는 첫 최상위 창'은 떠 있는 팝업일 수 있다
+            self.handle = int(screen.top_level_parent().handle or 0)
+        except Exception as exc:
+            log.debug("화면의 메인 창 핸들을 읽지 못했다: %s", type(exc).__name__)
+            self.handle = process_handle(_screen_pid(screen))
+        self.base = set(winprobe.child_windows(self.handle)) if self.handle else set()
+
+    def covering(self, rect) -> bool:
+        if not self.handle or rect is None:
+            return False
+        return any(handle not in self.base and _cover_ratio(box, rect) >= LOADING_COVER
+                   for handle, box in winprobe.child_windows(self.handle).items())
+
+    def busy(self) -> bool:
+        return bool(self.handle) and winprobe.ui_roundtrip(self.handle) >= BUSY_ROUNDTRIP
+
+
+def _cover_ratio(box, rect) -> float:
+    """rect(그리드) 면적 중 box 가 덮는 비율."""
+    width = min(box[2], rect[2]) - max(box[0], rect[0])
+    height = min(box[3], rect[3]) - max(box[1], rect[1])
+    area = max(rect[2] - rect[0], 1) * max(rect[3] - rect[1], 1)
+    return max(width, 0) * max(height, 0) / area
+
+
+def click_search(screen) -> Loading:
+    """[조회(F)]. 조회조건은 화면 기본값 그대로 쓴다. 누르기 전 기준선을 돌려준다 — `_wait_rows(loading=)` 에 넘긴다.
 
     **dry-run 에서도 누른다.** 조회는 읽기다. 조회하지 않으면 그리드가 비어
     이후 판정을 아무것도 확인할 수 없다.
     """
     button = ui.find(screen, auto_id=SEARCH_BUTTON_AUTO_ID, control_type="Button",
                      what="조회 버튼")
+    loading = Loading(screen)
     ui.click(button, "조회(F)")
+    return loading
 
 
 # ------------------------------------------------------------------ 그리드
@@ -246,10 +303,26 @@ def _grid(parent, auto_id: str, what: str):
     return ui.find(parent, auto_id=auto_id, control_type="Table", what=what)
 
 
-def _wait_rows(grid, what: str, timeout: float | None = None) -> int:
-    """행 수가 안정될 때까지 기다린다. 0행이어도 정상일 수 있다."""
+def _wait_rows(grid, what: str, timeout: float | None = None,
+               loading: Loading | None = None) -> int:
+    """조회가 끝나 행 수가 안정될 때까지 기다린다. 0행이어도 정상일 수 있다.
+
+    ★ **0행은 바로 믿지 않는다** (10-07 실측 — 덮개가 사라진 0.26초 뒤에도 0행, 1초 안에 행이 붙었다).
+      믿으면 상단은 훑은 행 0개로 보류 없이, [일반] 은 '저장할 행이 없다' 로 끝난다 — 조용한 누락.
+
+    | 상태 | 판정 |
+    | --- | --- |
+    | 덮개가 떠 있다 (`loading`) | 계속 기다린다 |
+    | 행이 있고 세 번 연속 같은 수 | 완료 |
+    | 0행 + ERPia 바쁨 | 계속 기다린다 |
+    | 0행이 덮개 없이·한가하게 `ZERO_ROWS_QUIET` 이어졌다 | 0행으로 확정 |
+
+    행 수는 늘 읽는다 — 상한에 닿으면 마지막으로 읽은 수를 돌려준다 (바쁨·덮개만 보다 0 을 돌려주지 않게).
+    바쁨은 0행 유예에만 쓴다 — 왕복 1ms 기준은 느린 PC 에서 오탐할 수 있어, 행이 보이는데 막지 않는다.
+    """
     timeout = SETTINGS.timeouts.long_task if timeout is None else timeout
-    state = {"count": -1, "same": 0}
+    rect = ui.rect_of(grid)
+    state = {"count": -1, "same": 0, "quiet": None, "loading": False}
 
     def settled():
         count = ui.visible_row_count(grid)
@@ -257,13 +330,26 @@ def _wait_rows(grid, what: str, timeout: float | None = None) -> int:
             state["same"] += 1
         else:
             state["count"], state["same"] = count, 0
-        return state["same"] >= 2
+        state["loading"] = loading is not None and loading.covering(rect)
+        if state["loading"]:
+            state["same"], state["quiet"] = 0, None
+            return False
+        if count > 0:
+            state["quiet"] = None
+            return state["same"] >= 2
+        if loading is not None and loading.busy():
+            state["quiet"] = None
+            return False
+        if state["quiet"] is None:
+            state["quiet"] = time.monotonic()
+        return time.monotonic() - state["quiet"] >= ZERO_ROWS_QUIET
 
     try:
         wait_for(settled, f"{what} 안정화", timeout=timeout)
     except WaitTimeout:
-        log.info("%s 행 수가 안정되지 않았다. 현재 %d행으로 진행한다.", what, state["count"])
-    log.info("%s: 화면에 보이는 %d행", what, state["count"])
+        log.warning("%s 가 %.0f초 안에 안정되지 않았다%s. 현재 %d행으로 진행한다.", what, timeout,
+                    " (로딩 표시가 아직 떠 있다)" if state["loading"] else "", max(state["count"], 0))
+    log.info("%s: 화면에 보이는 %d행", what, max(state["count"], 0))
     return max(state["count"], 0)
 
 
@@ -373,6 +459,14 @@ class _GroupTracker:
         self.closed: set[str] = set()
         self.broken = False
 
+    def seed(self, first: int, previous: str | None) -> None:
+        """찾기로 건너뛰었다 — `first` 행부터 본다. 그 윗행의 코드가 `previous` (1행이면 None).
+
+        건너뛴 위쪽은 보지 못한다 — 거기에 이 코드가 없다는 것은 정렬(헤더 오름차순)과
+        '윗행이 다른 코드' 확인(`_group_start`)을 믿는다.
+        """
+        self.last_number, self.current = first - 1, previous
+
     def feed(self, cells: dict[int, str], numbers) -> None:
         """이 화면의 행 번호들과 `{행 번호: 코드}`. 이미 본 번호는 건너뛴다."""
         if not self.enabled or self.broken:
@@ -403,7 +497,184 @@ class _GroupTracker:
         return self.enabled and not self.broken and self.code in self.closed
 
 
-def verify_holds(bottom_grid, expected: dict[str, int], grouped: bool = False) -> dict:
+# ------------------------------------------------------------------ 찾기(Ctrl+F)로 건너뛰기 (10-07)
+def _pages_below(grid) -> float | None:
+    """아래에 남은 화면 수 = 수직 스크롤바 '페이지 아래로' 높이 ÷ 썸('위치') 높이.
+
+    10-07 실측: 36행·한 화면 18행에서 1.2 (실제 1.0 — 조금 크게 나온다). 스크롤바가 없거나 맨 아래면 0,
+    썸 높이를 못 읽으면 None.
+    """
+    bar = ui.vertical_scrollbar(grid)
+    below = ui.scrollbar_button(grid, ui.SCROLL_CAN_DOWN_NAMES, bar=bar) if bar is not None else None
+    if below is None:
+        return 0.0
+    try:
+        thumbs = ui.find_all(bar, control_type="Thumb")
+        height = thumbs[0].rectangle().height() if thumbs else 0
+        return below.rectangle().height() / height if height > 0 else None
+    except Exception as exc:
+        log.debug("스크롤바 썸 높이를 읽지 못했다: %s", type(exc).__name__)
+        return None
+
+
+def _worth_finding(grid) -> bool:
+    """맨 위부터 몇 장 읽고도 그 코드가 없을 때 — 아래 남은 화면 × 페이지 비용이 찾기 비용보다 크면 True.
+
+    아래가 없으면(0) 그 코드는 이 하단에 없다 — 찾지 않는다. 남은 화면을 모르면 찾는다.
+    """
+    pages = _pages_below(grid)
+    if pages is None:
+        return True
+    if pages * PAGE_COST <= FIND_COST:
+        if pages > 0:
+            log.info("하단 아래 남은 화면이 %.1f장이라 찾기(약 %.0f초)보다 내려 읽는 편이 빠르다.",
+                     pages, FIND_COST)
+        return False
+    return True
+
+
+def _finder_windows(pid: int) -> list[int]:
+    """이 ERPia 의 '찾기'·'완료' 창 (기준선과 무관하게 — 늦게 뜨거나 남은 것까지)."""
+    return [w.handle for w in winprobe.top_windows(pid) if w.title in (FIND_TITLE, FIND_DONE_TITLE)]
+
+
+def _close_finders(pid: int, handle: int, late: bool = False) -> None:
+    """찾기·완료 창을 닫는다. `late` 면 ERPia 가 한가해질 때까지 본다 — 찾기 창이 안 떴을 때 늦게 뜰 수 있다.
+    끝내 남으면 ScreenError — 메인 창 위에 남아 이후 클릭을 가로챈다."""
+    def gone() -> bool:
+        windows = _finder_windows(pid)
+        for window in windows:
+            dialogs.post_close(window)
+        return not windows and not (late and handle and winprobe.ui_roundtrip(handle) >= BUSY_ROUNDTRIP)
+
+    try:
+        wait_for(gone, "찾기 창 닫힘", timeout=FIND_CLOSE_TIMEOUT, interval=0.1)
+    except WaitTimeout:
+        if _finder_windows(pid):
+            raise ScreenError("찾기 창이 닫히지 않는다. 물류대기 화면에 남은 [찾기] 창을 닫을 것.") from None
+
+
+def _type_find(finder: int, code: str, grid, pid: int, before: set) -> bool:
+    """찾기 창 입력칸에 code+Enter. 하단에 code 가 보이면 True, '완료'(없음)·상한이면 False."""
+    from pywinauto import Desktop
+
+    window = Desktop(backend=SETTINGS.backend).window(handle=finder).wrapper_object()
+    edit = ui.find(window, auto_id=FIND_EDIT_ID, control_type="Edit",
+                   timeout=FIND_OPEN_TIMEOUT, what="찾기 입력칸")
+    window.set_focus()
+    if not ui.wait_foreground(window, "찾기"):
+        log.info("찾기 창이 맨 앞으로 오지 않았다 — 키를 보내지 않는다 (맨 위부터 훑는다).")
+        return False
+    edit.type_keys("^a" + code + "{ENTER}", set_foreground=True)
+    state = {"none": False}
+
+    def arrived() -> bool:
+        if winprobe.new_window(pid, before, FIND_DONE_TITLE):
+            state["none"] = True
+            return True
+        return any((value or "").strip() == code
+                   for value in ui.column_values(grid, BOTTOM_CODE_COLUMN).values())
+
+    try:
+        wait_for(arrived, f"찾기로 {code} 까지", timeout=FIND_JUMP_TIMEOUT, interval=0.15)
+    except WaitTimeout:
+        log.info("찾기로 %.0f초 안에 %s 이(가) 보이지 않았다 (맨 위부터 훑는다).", FIND_JUMP_TIMEOUT, code)
+        return False
+    if state["none"]:
+        log.info("찾기: 하단에 %s 이(가) 없다는 '%s' 알림 (맨 위부터 훑는다).", code, FIND_DONE_TITLE)
+    return not state["none"]
+
+
+def _group_start(grid, code: str) -> tuple[int, str | None] | None:
+    """찾기로 간 화면에서 code 묶음의 시작 — (첫 행 번호, 그 윗행 코드). 윗행이 안 보이면 한 줄 올려 본다.
+
+    찾기는 일부만 같아도 가므로 **정확히 같은** 행만 본다. 시작을 못 확인하면 None.
+    """
+    for attempt in range(2):
+        codes = ui.column_values(grid, BOTTOM_CODE_COLUMN)
+        hits = sorted(n for n, value in codes.items() if (value or "").strip() == code)
+        if not hits:
+            return None
+        first = hits[0]
+        if first == 1:
+            return 1, None
+        if first - 1 in codes:
+            return first, (codes[first - 1] or "").strip()
+        if attempt or not ui.scroll_up_line(grid):
+            return None
+    return None
+
+
+def find_code(grid, code: str, pid: int | None) -> tuple[int, str | None] | None:
+    """찾기(Ctrl+F)로 정렬된 하단의 `code` 묶음까지 건너뛴다. (묶음 첫 행 번호, 그 윗행 코드) — 못 하면 None.
+
+    None 이면 부르는 쪽은 맨 위부터 훑는다 — 찾기는 속도용이지 정확성의 전제가 아니다.
+    키는 맨 앞 창이 ERPia(찾기 창)일 때만 보낸다. 찾기 창은 늘 닫는다 (취소돼도 닫기를 보낸다).
+    """
+    rows = ui.grid_rows(grid)
+    if not pid or not rows or not FIND_SAFE.match(code):
+        return None
+    main = grid.top_level_parent()
+    handle = int(getattr(main, "handle", 0) or 0)
+    if _finder_windows(pid):
+        _close_finders(pid, handle)                 # 앞서 남은 찾기 창이 있으면 그것부터
+    started = time.monotonic()
+    before = {w.handle for w in winprobe.top_windows(pid)}
+    arrived = opened = False
+    try:
+        # 맨 앞 확인을 먼저 — 아니면 좌표 클릭이 다른 프로그램에 떨어진다
+        if not ui.bring_forward(grid, "하단 그리드 (찾기 전)"):
+            log.info("ERPia 가 맨 앞이 아니라 찾기를 쓰지 않는다 (맨 위부터 훑는다).")
+            return None
+        # 찾기는 포커스가 있는 컬럼에서 찾는다 — 코드 칸을 누른다 (상품을 고른 뒤 포커스는 상단에 있다)
+        ui.click(ui.cell(rows[0], BOTTOM_CODE_COLUMN, timeout=FIND_OPEN_TIMEOUT),
+                 "하단 첫 행 코드 칸 (찾기 포커스)", methods=("클릭",))
+        focus, own = winprobe.focus_handle(handle), int(getattr(grid, "handle", 0) or 0)
+        if not winprobe.is_within(focus, own):
+            # 상단에 포커스가 남았으면 상단 찾기가 열려 상단 선택(=하단 재조회)이 바뀐다
+            log.info("키보드 포커스가 하단 그리드에 없다(%s / 하단 %s) — 찾기를 쓰지 않는다.", focus, own)
+            return None
+        main.type_keys("^f", set_foreground=True)
+        wait_for(lambda: winprobe.new_window(pid, before, FIND_TITLE), "찾기 창",
+                 timeout=FIND_OPEN_TIMEOUT, interval=0.1)
+        opened = True
+        arrived = _type_find(winprobe.new_window(pid, before, FIND_TITLE), code, grid, pid, before)
+    except Exception as exc:
+        # 찾기는 속도용이다 — 어디서 실패하든 맨 위부터 훑으면 결과는 같다. 실패 이유는 남긴다
+        log.info("찾기를 쓰지 못했다 — 맨 위부터 훑는다: %s: %s", type(exc).__name__, exc)
+    finally:
+        for window in _finder_windows(pid):          # 취소돼도 닫기는 보낸다 (기다리지 않는다)
+            dialogs.post_close(window)
+    _close_finders(pid, handle, late=not opened)
+    if not arrived:
+        return None
+    start = _group_start(grid, code)
+    if start is None:
+        log.info("찾기로 간 화면에서 %s 묶음의 시작을 확인하지 못했다 (맨 위부터 훑는다).", code)
+        return None
+    log.info("찾기로 %s 묶음(행 %d부터)으로 건너뛰었다 (%.1f초).", code, start[0], time.monotonic() - started)
+    return start
+
+
+def _skip_ahead(grid, code: str, pid: int | None, tracker: _GroupTracker) -> bool | None:
+    """맨 위부터 FIND_AFTER_PAGES 장을 읽고도 code 가 안 나왔을 때 부른다 — 아래가 많이 남았으면 찾기로 건너뛴다.
+
+    None = 안 찾았다(그대로 내려 읽는다) / True = 건너뛰었다(tracker 를 맞췄다 — 내리지 말고 그 화면을 읽는다) /
+    False = 찾다가 못 했다(화면이 어디로 갔는지 모른다 — 부르는 쪽은 맨 위부터 다시 센다).
+    정렬이 확인됐을 때만(`tracker.enabled`) — 건너뛴 위쪽에 그 코드가 없다는 근거가 정렬이다.
+    `pid` 가 없으면(확인 도구의 가짜 그리드 포함) 쓰지 않는다.
+    """
+    if not pid or not tracker.enabled or not FIND_SAFE.match(code) or not _worth_finding(grid):
+        return None
+    start = find_code(grid, code, pid)
+    if start is None:
+        return False
+    tracker.seed(*start)
+    return True
+
+
+def verify_holds(bottom_grid, expected: dict[str, int], grouped: bool = False,
+                 pid: int | None = None) -> dict:
     """**정말로 보류가 걸렸는지** 지금 하단에 보이는 것을 훑어 확인한다.
 
     `expected` 는 `{상품코드: 이번에 체크한 행 수}` 다. 실제 보류 수가 그보다
@@ -425,11 +696,11 @@ def verify_holds(bottom_grid, expected: dict[str, int], grouped: bool = False) -
     if not expected:
         return {"checked_codes": 0, "ok": 0, "short": {}}
 
-    held, seen = _scan_holds(bottom_grid, expected, grouped)
+    held, seen = _scan_holds(bottom_grid, expected, grouped, pid)
     if any(held[c] < expected[c] for c in expected):
         # 보류 값이 늦게 그려질 수 있다 (가설, 09-28 검토). 모자랄 때만 한 번 더 본다
         pause(HOLD_SETTLE, "보류 값 갱신을 기다렸다가 한 번 더 확인한다")
-        held, seen = _scan_holds(bottom_grid, expected, grouped)
+        held, seen = _scan_holds(bottom_grid, expected, grouped, pid)
 
     short = {c: (expected[c], held[c]) for c in expected if held[c] < expected[c]}
     for code, (want, got) in short.items():
@@ -447,13 +718,16 @@ def verify_holds(bottom_grid, expected: dict[str, int], grouped: bool = False) -
 HOLD_SETTLE = 1.5   # 초. 보류 확인이 모자랄 때 다시 훑기 전 쉬는 시간
 
 
-def _scan_holds(bottom_grid, expected: dict[str, int], grouped: bool):
-    """하단을 위에서부터 훑어 `{상품코드: 보류된 행 수}` 와 훑은 행 번호를 돌려준다."""
+def _scan_holds(bottom_grid, expected: dict[str, int], grouped: bool, pid: int | None = None):
+    """하단을 위에서부터 훑어 `{상품코드: 보류된 행 수}` 와 훑은 행 번호를 돌려준다.
+
+    정렬돼 있고 맨 위부터 몇 장을 읽어도 그 코드가 없으면 찾기로 묶음까지 건너뛴다 (`_skip_ahead`, 10-07)."""
     scroll_bottom_top(bottom_grid)
     held: dict[str, int] = {code: 0 for code in expected}
     seen: set[int] = set()
     # 정렬돼 있으면 그 코드 묶음이 끝난 곳에서 멈춘다 (상품 하나씩 부를 때만).
     tracker = _GroupTracker(next(iter(expected)), grouped and len(expected) == 1)
+    met = tried = False             # 그 코드를 봤나 / 찾기를 해 봤나
 
     for attempt in range(MAX_SCROLLS):
         if attempt == MAX_SCROLLS - 1:
@@ -468,6 +742,7 @@ def _scan_holds(bottom_grid, expected: dict[str, int], grouped: bool):
         cells = ui.columns_values(bottom_grid, (BOTTOM_CODE_COLUMN, HOLD_COLUMN))
         codes = cells[BOTTOM_CODE_COLUMN]
         holds = cells[HOLD_COLUMN]
+        met = met or any((value or "").strip() == tracker.code for value in codes.values())
         numbers = [ui.row_number(row) for row in ui.grid_rows(bottom_grid)]
         for number in numbers:
             if number is None or number in seen:
@@ -492,6 +767,17 @@ def _scan_holds(bottom_grid, expected: dict[str, int], grouped: bool):
             break
         if new_rows == 0 and attempt > 0:
             break
+        if not tried and not met and attempt + 1 >= FIND_AFTER_PAGES:
+            tried = True
+            outcome = _skip_ahead(bottom_grid, tracker.code, pid, tracker)
+            if outcome:
+                continue    # 건너뛰었다 — 내리지 말고 그 화면을 읽는다
+            if outcome is False:
+                # 화면이 어디로 갔는지 모른다 — 맨 위부터 다시 센다 (그 코드는 아직 못 봤으니 잃을 것이 없다)
+                scroll_bottom_top(bottom_grid)
+                seen.clear()
+                tracker = _GroupTracker(tracker.code, tracker.enabled)
+                continue
         if not ui.scroll_down_verified(bottom_grid):
             break
     return held, seen
@@ -564,6 +850,8 @@ def check_matching_rows(bottom_grid, code: str, dry_run: bool = False,
     만난 뒤에도 그리드 끝까지 본다 (2026-09-04 확정).
     True 면(하단이 `ERP상품코드` 오름차순, 2026-09-17) **그 코드 묶음이 끝난
     화면에서 멈춘다.** 읽은 순서가 정말 모여 있지 않으면 끝까지 본다.
+    맨 위부터 FIND_AFTER_PAGES 장을 읽어도 그 코드가 없고 아래가 많이 남았으면 찾기(Ctrl+F)로
+    묶음까지 건너뛴다 (`_skip_ahead`, 10-07 사용자 요청 — `pid` 가 있을 때만).
 
     이미 보류된 행은 체크하지 않는다.
     """
@@ -577,6 +865,7 @@ def check_matching_rows(bottom_grid, code: str, dry_run: bool = False,
     # 끝났어도 멈추지 않고, 끝까지 못 찾으면 경고한다 (2026-09-17 검토 반영.
     # 예전에는 화면마다 잊어버려 조용히 누락될 수 있었다).
     pending: set[int] = set()
+    tried = False                    # 찾기를 해 봤나
     scroll_bottom_top(bottom_grid)   # 위쪽 행을 놓치지 않으려면 맨 위에서 시작한다
 
     for attempt in range(MAX_SCROLLS):
@@ -680,6 +969,18 @@ def check_matching_rows(bottom_grid, code: str, dry_run: bool = False,
             break
         if new_rows == 0 and attempt > 0:
             break
+        if not tried and code not in seen_codes and attempt + 1 >= FIND_AFTER_PAGES:
+            tried = True
+            outcome = _skip_ahead(bottom_grid, code, pid, tracker)
+            if outcome:
+                continue    # 건너뛰었다 — 내리지 말고 그 화면을 읽는다
+            if outcome is False:
+                # 화면이 어디로 갔는지 모른다 — 맨 위부터 다시 센다 (그 코드는 아직 못 봤으니 체크한 것이 없다)
+                scroll_bottom_top(bottom_grid)
+                seen_rows.clear()
+                seen_codes.clear()
+                tracker = _GroupTracker(code, grouped)
+                continue
 
         # 스크롤이 실제로 먹었는지 **행 번호 변화로** 확인한다.
         # 예외가 없다고 스크롤된 것이 아니다 (2026-09-04에 여기서 6건을 놓쳤다).
@@ -797,8 +1098,9 @@ def wait_bottom_ready(bottom_grid, code: str, handle: int = 0,
         log.info("하단 재조회 완료 — 상품코드 %s, 보이는 %d행 (%.2f초).",
                  code, state["count"], spent)
     else:
-        log.info("하단에 상품코드 %s 인 행이 없다. 화면이 조용해 그대로 진행한다 "
-                 "(%.2f초, 보이는 %d행).", code, spent, state["count"])
+        # 정렬된 하단이면 아래쪽에 있을 수 있다 (10-07 — check_matching_rows 가 내려 읽거나, 멀면 찾기로 건너뛴다)
+        log.info("하단 화면에 상품코드 %s 인 행이 안 보인다 (아래에 있거나 주문이 없다). 화면이 조용해 "
+                 "그대로 진행한다 (%.2f초, 보이는 %d행).", code, spent, state["count"])
     return state["count"]
 
 
@@ -908,13 +1210,13 @@ def hold_shortage_items(screen, pid: int | None = None, dry_run: bool = False) -
     label = "부족 재고 배송보류" + (" [dry-run]" if dry_run else "")
     with step(log, label):
         activate_tab(screen, TAB_STOCK_REVIEW)
-        click_search(screen)
+        loading = click_search(screen)
         if dry_run:
             # 조회까지는 했다. 체크와 보류만 누르지 않는다.
             log.warning("[dry-run] 조회는 했다. 체크·보류·저장은 누르지 않는다.")
 
         top_grid = _grid(screen, TOP_GRID_AUTO_ID, "상단 재고 그리드")
-        _wait_rows(top_grid, "상단 재고 그리드")
+        _wait_rows(top_grid, "상단 재고 그리드", loading=loading)
         name_column = _name_column(top_grid)
         if name_column is None:
             log.warning("상단 그리드에서 상품명 컬럼(%s)을 찾지 못했다. "
@@ -1055,7 +1357,7 @@ def hold_shortage_items(screen, pid: int | None = None, dry_run: bool = False) -
                     # ★ 확인은 **여기서** 한다. 하단은 지금 이 상품으로 걸러져
                     #   있으므로, 나중에 한 번에 확인하면 마지막 상품밖에 못 본다
                     #   (`verify_holds` 주석). 기대 수를 채우면 바로 끝낸다.
-                    result = verify_holds(bottom_grid, {code: checked}, grouped=grouped)
+                    result = verify_holds(bottom_grid, {code: checked}, grouped=grouped, pid=pid)
                     verify["ok"] += result.get("ok", 0)
                     verify["short"].update(result.get("short", {}))
                     verify["checked_codes"] += 1
@@ -1161,10 +1463,10 @@ def save_general(screen, dry_run: bool = False, info: dict | None = None) -> int
     label = "물류대기 저장" + (" [dry-run]" if dry_run else "")
     with step(log, label):
         activate_tab(screen, TAB_GENERAL)
-        click_search(screen)
+        loading = click_search(screen)
 
         grid = _general_grid(screen)
-        before = _wait_rows(grid, "일반 탭 그리드")
+        before = _wait_rows(grid, "일반 탭 그리드", loading=loading)
         info["before"] = before         # 0 이면 저장할 것이 없었다 — 사용량에서 '할 일 없음' 판정에 쓴다
         if dry_run:
             log.warning("[dry-run] 조회는 했다(%d행). 전체선택·저장은 하지 않는다.", before)
@@ -1178,6 +1480,8 @@ def save_general(screen, dry_run: bool = False, info: dict | None = None) -> int
         info["slips_before"] = slips_before
         log.info("저장 전 [일반] %d행 = 전표 %s건%s", before, slips_before,
                  "" if exact_before else " (끝까지 못 셌다)")
+        # 화면 밖 행이 있으면 보이는 행 수는 저장 전후가 같을 수 있다 — 저장 뒤 전표 수로만 판정한다 (10-07 검토)
+        many = bool(ui.has_hidden_rows(grid))
         ui.header_select_all(grid)
         log.info("전체선택 완료. 저장한다. (처리 전 %d행)", before)
 
@@ -1185,6 +1489,7 @@ def save_general(screen, dry_run: bool = False, info: dict | None = None) -> int
                        what="저장 버튼")
         # **마우스 클릭만 쓴다.** Invoke 는 버튼 핸들러가 모달 팝업을 띄우면
         # 반환되지 않고 63초 뒤 타임아웃한다 (2026-09-04 실행에서 재현).
+        saving = Loading(screen)        # 저장 뒤 다시 그릴 때의 로딩 표시를 보려고 누르기 전에 잡는다
         ui.click(save, "저장(S)", methods=("클릭",))
 
         # 저장되면 처리된 건이 목록에서 빠진다 — 행 수가 줄면 완료. 전부 보류라 정상 건이 없으면
@@ -1199,7 +1504,7 @@ def save_general(screen, dry_run: bool = False, info: dict | None = None) -> int
         #   한계: 저장이 **백그라운드 스레드**에서 돌면 UI 는 한가해 보인다.
         #   그때는 실제로 저장됐는데 0행으로 보고할 수 있다 — 예전 타임아웃
         #   경로와 **결과가 같고**, 다만 120초가 아니라 몇 초로 끝난다.
-        handle = process_handle(_screen_pid(screen))
+        handle = saving.handle
         state = {"rows": before, "idle": 0}
         started = time.monotonic()
 
@@ -1224,6 +1529,18 @@ def save_general(screen, dry_run: bool = False, info: dict | None = None) -> int
                 SETTINGS.timeouts.long_task, before,
             )
             return 0
+        if many:
+            after = _wait_rows(grid, "일반 탭 그리드", loading=saving)
+            slips_after, exact_after = count_general_slips(grid) if after else (0, True)
+            if (slips_before is not None and slips_after is not None and exact_before and exact_after
+                    and slips_before >= slips_after):
+                info["exact"] = True
+                log.info("저장 완료 — 전표 %d건 → %d건 (화면 밖 행이 있어 전표로 다시 셌다)",
+                         slips_before, slips_after)
+                return slips_before - slips_after
+            log.warning("저장 뒤 전표 수를 끝까지 세지 못했다 (전 %s / 후 %s). 넘긴 주문 수는 모른다.",
+                        slips_before, slips_after)
+            return 0
         if state["rows"] == before:
             log.warning("저장 뒤에도 %d행 그대로고 ERPia 는 한가하다 (%.1f초). "
                         "처리할 정상 건이 없었을 수 있다(전부 보류 상태).",
@@ -1231,7 +1548,7 @@ def save_general(screen, dry_run: bool = False, info: dict | None = None) -> int
             info["exact"] = True        # 아무것도 빠지지 않았다 — 넘긴 전표 0 이 정확한 값이다
             return 0
 
-        after = _wait_rows(grid, "일반 탭 그리드")
+        after = _wait_rows(grid, "일반 탭 그리드", loading=saving)
         if after >= before:
             # 화면에 보이는 행 수는 가상 스크롤 때문에 총 건수가 아니다.
             # 처리할 정상 건이 없었을 수도 있어 실패로 보지는 않는다.

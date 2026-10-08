@@ -21,7 +21,8 @@ Win32 `EnumWindows` 는 창 목록만 훑으므로 비용이 트리 크기와 �
 
 - UIA 를 쓰지 않는다. 여기서 얻는 것은 **핸들과 클래스·제목뿐**이다
 - 조작하지 않는다. 읽기만 한다
-- 자식 컨트롤은 보지 않는다. 그건 대상을 찾은 **뒤에** UIA 로 한다
+- 자식 컨트롤은 보지 않는다. 그건 대상을 찾은 **뒤에** UIA 로 한다 — 예외는 `child_windows`(핸들·위치만,
+  그리드를 덮는 로딩 표시를 보려고, 10-07)
 
 소유된 팝업(owned popup)도 최상위 창이라 `EnumWindows` 에 나온다.
 그래서 "부모 창의 자식으로 뜨는 팝업"도 여기서 잡힌다.
@@ -124,6 +125,70 @@ def top_windows(pid: int | None = None, visible_only: bool = True) -> list[Windo
     except Exception as exc:
         log.debug("EnumWindows 실패: %s", type(exc).__name__)
     return found
+
+
+def child_windows(handle: int) -> dict[int, tuple]:
+    """그 창 아래의 **보이는** 자식 창 전부(손자까지) `{핸들: (left, top, right, bottom)}`.
+
+    ERPia 는 [조회] 중 그리드와 같은 크기의 자식 창(로딩 표시)을 그리드 위에 띄운다 — Win32 로 본다 (10-07 실측,
+    `docs/CONTROLS.md` "찾기(Ctrl+F) 창·조회 로딩 창". UIA 에 보이는지는 확인하지 않았다). 메인 창 아래 ~160개라 싸다.
+    예외를 올리지 않는다 — 못 읽으면 빈 dict (위의 대기가 멈추지 않게).
+    """
+    found: dict[int, tuple] = {}
+    if not handle:
+        return found
+
+    def collect(child, _lparam):
+        try:
+            if _user32.IsWindowVisible(child):
+                rect = rect_of(child)
+                if rect is not None:
+                    found[int(child)] = rect
+        except Exception as exc:
+            log.debug("자식 창 정보를 읽지 못했다(건너뛴다): %s", type(exc).__name__)
+        return True
+
+    try:
+        _user32.EnumChildWindows(wintypes.HWND(handle), _ENUM_PROC(collect), 0)
+    except Exception as exc:
+        log.debug("EnumChildWindows 실패: %s", type(exc).__name__)
+    return found
+
+
+def new_window(pid: int, before: set, title: str) -> int:
+    """기준선(before 핸들 집합)에 없던, 제목이 `title` 인 이 프로세스의 최상위 창. 없으면 0."""
+    return next((w.handle for w in top_windows(pid) if w.title == title and w.handle not in before), 0)
+
+
+class _GuiThreadInfo(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD),
+                ("hwndActive", wintypes.HWND), ("hwndFocus", wintypes.HWND),
+                ("hwndCapture", wintypes.HWND), ("hwndMenuOwner", wintypes.HWND),
+                ("hwndMoveSize", wintypes.HWND), ("hwndCaret", wintypes.HWND),
+                ("rcCaret", wintypes.RECT)]
+
+
+def focus_handle(handle: int) -> int:
+    """그 창의 UI 스레드에서 지금 키보드 포커스를 가진 창. 못 읽으면 0.
+
+    키를 보내기 전 '포커스가 정말 그 컨트롤에 있나' 를 본다 (10-07 — 찾기는 포커스가 있는 그리드에서 열린다).
+    """
+    try:
+        thread = _user32.GetWindowThreadProcessId(wintypes.HWND(handle), None)
+        info = _GuiThreadInfo(cbSize=ctypes.sizeof(_GuiThreadInfo))
+        if not thread or not _user32.GetGUIThreadInfo(thread, ctypes.byref(info)):
+            return 0
+        return int(info.hwndFocus or 0)
+    except Exception as exc:
+        log.debug("포커스 창을 읽지 못했다: %s", type(exc).__name__)
+        return 0
+
+
+def is_within(child: int, ancestor: int) -> bool:
+    """child 가 ancestor 자신이거나 그 아래 창인가."""
+    if not child or not ancestor:
+        return False
+    return child == ancestor or bool(_user32.IsChild(wintypes.HWND(ancestor), wintypes.HWND(child)))
 
 
 def ui_roundtrip(handle: int, timeout: float = 1.0) -> float:

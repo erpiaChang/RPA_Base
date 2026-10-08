@@ -31,6 +31,17 @@ class DialogNotFound(RuntimeError):
     """기대한 팝업이 뜨지 않았다."""
 
 
+def post_close(handle: int) -> None:
+    """창에 닫기(WM_CLOSE)를 **보내기만** 한다 — 기다리지 않는다 (취소 중인 finally 에서도 부른다, 10-07 찾기 창)."""
+    import ctypes
+    from ctypes import wintypes
+
+    try:
+        ctypes.windll.user32.PostMessageW(wintypes.HWND(handle), 0x0010, 0, 0)   # WM_CLOSE
+    except Exception as exc:
+        log.debug("닫기를 보내지 못했다: %s", type(exc).__name__)
+
+
 def find(parent, title_re: str, exclude_handle: int | None = None):
     """부모 창 하위에서 팝업을 찾는다. 없으면 None.
 

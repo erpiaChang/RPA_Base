@@ -82,7 +82,7 @@
 | `automation/sidebar.py` | 좌측 프로세스바 auto_id 3개 (주문수집·물류대기·물류처리) — 화면 모듈 셋이 같이 쓴다 (09-22) |
 | `automation/updater.py` | 업데이트 안내 창은 누르고, **UAC 동의 창은 탐지해 사람에게 알린다**(누를 수 없다). `alert` 로 서버에도 — 업체 담당자 메일 (10-02) |
 | `automation/order_mapping.py` | 화면 진입 / 주문수집(자동·엑셀) / 매출처리. **버튼 없는 사이트 행은 안 누른다**. `collect_counts_all` — 수집로그를 **끝까지** 내려 센다 (09-22). **매출처리 방식은 설정 `sales_mode`** (10-01) — `전체` [매출처리] 단추 → '일괄' [예] / `선택주문` `select_all_orders`·`open_selected_sales` |
-| `automation/logistics_wait.py` | 물류대기 전체. `menu_available()` — **메뉴가 없는 계정 판정** / `ensure_bottom_sorted()` — 하단 정렬 후 묶음 끝에서 스캔 중단 (09-17). **주문 수는 행이 아니라 전표로** (09-29) — 보류는 체크한 행의 `전표번호`, 저장은 [일반] 탭 전후 `count_general_slips` (전표번호가 오른쪽 밖이라 가로로 넘겨 읽는다) |
+| `automation/logistics_wait.py` | 물류대기 전체. `menu_available()` — **메뉴가 없는 계정 판정** / `ensure_bottom_sorted()` — 하단 정렬 후 묶음 끝에서 스캔 중단 (09-17). **주문 수는 행이 아니라 전표로** (09-29) — 보류는 체크한 행의 `전표번호`, 저장은 [일반] 탭 전후 `count_general_slips` (전표번호가 오른쪽 밖이라 가로로 넘겨 읽는다). **10-07**: [조회] 완료 판정 — 로딩 표시(그리드를 덮는 새 자식 창)를 보고 0행은 조용함 3초 뒤에만 믿는다 (`Loading`·`_wait_rows(loading=)`) / **찾기(Ctrl+F)로 건너뛰기** — 정렬된 하단을 맨 위부터 3장 읽고도 그 코드가 없고 아래가 많이 남았을 때만. 맨 앞 창·하단 키보드 포커스 확인, 늦게 뜬 찾기 창도 닫기, 묶음 시작(윗행이 다른 코드) 확인, 못 하면 맨 위부터 다시 (`_skip_ahead`·`find_code`). [일반] 이 한 화면을 넘으면 저장 뒤 전표로 다시 센다 (10-08) |
 | `automation/logistics.py` | 물류관리 전체. `select_mode()` 자동/수동, `press_finish()` 마지막 버튼. `count_slips` — 하단 `매출번호` 를 **끝까지** 읽어 중복 없이 = 올라간 주문 (09-29). `count_boxes` — **만든 전표 = 박스(송장) 수**, 저장 직전 상단 `배송업체` 가 찬 줄 (09-29 실기: 주문 2건 → 송장 31) |
 | `collect/webmail.py` | **메일 사이트 틀** (10-02) — `MailSite` 계약(로그인 한 번·목록·메일 열기·첨부 단추·목록으로) + `login`(재시도)·`collect`(대상 선별·받기·매니페스트). 사이트마다 다른 것은 사이트 파일에만 — 목록을 기간 안쪽이 끝날 때까지 넘기는 일도 사이트 파일(`list_rows_until`, 상한 `MAX_PAGES`=20) |
 | `collect/browser.py` | 시크릿 창 브라우저 (Playwright, `CHANNELS` msedge·chrome). 브라우저 없음은 `BrowserError` 로 사람 말 (10-07). **사이트 화면 도우미** (10-07, `docs/SITES.md` 4절) — `click_through`(가로막는 공지)·`hover_click`·`receive_download`/`save_download`(팝업 포함·엑셀 검사)·`DialogGuard`(기대 문구만 수락)·`RowWatch`(새 줄만). Playwright 는 함수 안에서만 부른다 (메일 없는 빌드) |
@@ -92,11 +92,11 @@
 | `collect/phonelink.py` | [휴대폰 연결] 앱에서 인증 문자 읽기. **읽기 전 [메시지] 탭 맞추기**(UIA 선택), **대화 목록 우선**(대화창 비면 폴백), 끊기면 [다시 시도] 한 번 + **최대 5분** 대기. **오프라인이면 캐시 목록으로 준비됨이라 하지 않는다**. `peek` — 앱을 띄우거나 누르지 않고 연결 상태만 (10-02) |
 | `collect/sms.py` | 인증 문자 읽기 (adb). 문자 조회만 허용 |
 | `collect/storage.py` / `manifest.py` | 날짜·차수 폴더 규칙 / `manifest.json`. 소비 표시는 **그 항목에** (`mark_consumed(item)` — 받기 실패 뒤 다시 받으면 같은 메일 키가 둘이다, 10-02) |
-| `utils/ui.py` | **모든 UI 조작의 단일 창구.** `reveal_cell()` 잘린 셀 보이게 / `grid_data_area()`. **건수 세기** (09-29) — `scan_column`·`distinct_count` 끝까지 내려 한 컬럼을 중복 없이(스크롤바 버튼만) / `reveal_column`·`columns_home` 가로로 가려진 컬럼 보이게·되돌리기 |
-| `utils/dialogs.py` / `filedialog.py` | 팝업 / 파일 선택 창. `dismiss_message_box()` — ERPia 알림이 **[확인] 하나면 닫는다** (09-22) |
+| `utils/ui.py` | **모든 UI 조작의 단일 창구.** `reveal_cell()` 잘린 셀 보이게 / `grid_data_area()`. **건수 세기** (09-29) — `scan_column`·`distinct_count` 끝까지 내려 한 컬럼을 중복 없이(스크롤바 버튼만) / `reveal_column`·`columns_home` 가로로 가려진 컬럼 보이게·되돌리기 / `scroll_up_line` 스크롤바 '위로 선' 한 번 (10-07) |
+| `utils/dialogs.py` / `filedialog.py` | 팝업 / 파일 선택 창. `dismiss_message_box()` — ERPia 알림이 **[확인] 하나면 닫는다** (09-22). `post_close()` 창에 닫기만 보낸다 (찾기 창, 10-08) |
 | `utils/wait.py` / `cancel.py` | 조건 대기(timeout 필수, 취소 확인) / 중단 토큰(`Cancelled` 는 BaseException) |
 | `utils/process.py` | PID·생성시각·**이름으로 찾기**(`pids_by_name`) / `screen_locked()` (잠금 화면 앱 포함) |
-| `utils/winprobe.py` | 최상위 창을 싸게 찾기 (Win32). `rect_of()` |
+| `utils/winprobe.py` | 최상위 창을 싸게 찾기 (Win32). `rect_of()` / `child_windows()` 보이는 자식 창의 핸들·위치 — 그리드를 덮는 로딩 표시 / `new_window()` 기준선 뒤 새 창 / `focus_handle()`·`is_within()` 키보드 포커스가 그 컨트롤 안인가 (10-07~08) |
 | `utils/schedule.py` / `autorun.py` | 예약 계산 — **예약 여러 개, 날 조건(매일·요일·매월 N일·날짜 지정), 줄마다 기능** (09-21) / 지금 돌려도 되는가 + 회차 기록. **10-02**: [일시정지] 를 `logs/autorun_state.json` 에 남긴다, `skip()` — 예약 전 경고의 [이번만 건너뛰기], 시각을 10분 넘게 놓치면 건너뜀 |
 | `utils/secret.py` / `envfile.py` | 비밀번호 감싸기. 로컬 `dpapi:`(그 PC에서만) / 구운 값 `baked:` — 씨앗은 git 밖 (`.env` 의 `BAKED_SEED`, 빌드본은 번들 안 `config/baked.key`, 10-02) / `.env` 읽기 |
 | `orchestrator/collect_flow.py` / `erpia_flow.py` / `full_flow.py` | 기능별 업무 흐름. `full_flow` 는 **고른 기능만** 돈다. **메일 단계가 실패해도 뒤 기능으로 넘어간다** (09-30 — 메일만 골랐거나 [중단] 이면 멈춘다) |
@@ -132,7 +132,7 @@
 | **확인 (대상 프로그램을 안 건드린다)** | |
 | `probe_progress.py` | 단계 통지·중단·구간 실행·상세 표·결과 문구(물류관리 = 송장 수 + 주문 수) (47) |
 | `probe_rect_settle.py` | 위치 계측·잘린 셀 보이게·버튼 판정·`ui.py` 검토 수정(키 입력 이스케이프·화면 밖 클릭 안 함·체크 반영 대기·모니터 배율) (27) |
-| `probe_hold_loop.py` | 물류대기 보류 루프·메뉴 없는 계정·하단 정렬·**건수는 데이터로**(끝까지 세기·[일반] 가로 컬럼·보류 주문 중복 없이·조회된 주문수·물류관리 박스 수) (53) |
+| `probe_hold_loop.py` | 물류대기 보류 루프·메뉴 없는 계정·하단 정렬·**건수는 데이터로**(끝까지 세기·[일반] 가로 컬럼·보류 주문 중복 없이·조회된 주문수·물류관리 박스 수)·[조회] 완료 판정(늦게 붙는 행·덮개·진짜 0행·바쁨)·찾기로 건너뛰기(3장 읽고도 없고 아래가 많을 때만·가까운 묶음은 안 찾음·화면을 옮겨 놓고 실패해도 맨 위부터·묶음 시작 확인·맨 앞 창·하단 포커스·늦게 뜬 창 닫기·안 닫히면 멈춤·취소·찾기 창 입력은 맨 앞일 때만 — 전부 가짜)·[일반] 기준선 배선·한 화면 넘는 저장 뒤 전표로 (10-07~08) (103) |
 | `probe_failure.py` | 실패 주입·알림 닫고 다음 단계로·같은 계정만 닫기·인증 재시도·매출처리 팝업 경합·'일괄' 창 [예]·선택주문 메뉴는 마우스 클릭만·매출처리 방식(전체/선택주문) 분기·빈 값은 멈춤·같은 아이디 ERPia 찾기·[멈춘 곳부터 다시] 계산·재시도 상한이 상수로 있는지·자동수집 대기 중 알림 닫기와 버튼 읽기 실패(10-07)·**진짜 창**(가짜 ERPia WinForms 팝업 — 같은 auto_id)·대기 중 ERPia 가 꺼지면 곧 멈춤·로그인 중 비밀번호 변경 요구 창([다음에 변경하기], 강제 변경이면 멈춤, 10-07) (65) |
 | `probe_schedule.py` / `probe_autorun.py` | 예약 계산(요일·매월·날짜 지정·줄마다 기능·방식이 비면 안 돈다) (97) / 자동 실행 판정·잠금 화면·이번만 건너뛰기·놓친 시각·일시정지 저장 (59) |
 | `probe_updater.py` | 업데이트·UAC 판정·실행 직후 UAC·관리자 권한 재실행 (18) |
@@ -165,7 +165,7 @@
 | `probe_speed.py` / `probe_resources.py` / `probe_search_trace.py` | 속도 배율 / 자원 / 탐색 집계 (`test_flow --trace`) |
 | **조작 (`APPROVED-RUN` 필요)** | |
 | `test_flow.py` | 전체 흐름 콘솔 실행. `--from` `--yes` `--dry-run` `--trace` |
-| `test_find_jump.py` | **찾기(Ctrl+F) 점프·조회 로딩 창 측정** (10-07, 데이터 안 바꿈) — 물류대기 [재고검토] 에서 Ctrl+F 가 따로 뜨는 '찾기' 창(`txt_Key`)인지(Win32·UIA 둘로), 점프 vs 끝까지 훑기 시간, [조회]·상단 행 선택 때 그리드를 덮는 자식 창과 우리 완료 판정 비교. `--launch` 는 흐름처럼 켜고 로그인. 키는 맨 앞 창이 ERPia 일 때만. **10-07 돌림** — 결과는 `CONTROLS.md` "찾기(Ctrl+F) 창·조회 로딩 창". 지울 대상(승인 뒤) |
+| `test_find_jump.py` | **찾기(Ctrl+F)·[조회] 로딩 측정** (10-07 2차 판, 데이터 안 바꿈 — 체크·보류·저장 안 누름) — [조회] 새 판정 확인(2초 뒤 다시 세기), 그리드별 스크롤바 요소·아래 남은 화면, 한 페이지 비용, 화면 밖 코드로 찾기(코드 칸 포커스·간 자리·윗행·돌아서 찾기·포함 검색·없는 값 알림), 부족 상품마다 정렬 뒤 첫 화면에 코드가 있나, 제품 `find_code`·찾기로 건너뛴 `check_matching_rows`(dry-run) 대 맨 위부터. `--launch` 는 흐름처럼 켜고 로그인(`--company` 업체코드만 바꿈 — 값은 명령줄에만). `--survey-only --deep N` 상품별 판정·두 길 견주기만 / `--requery 앞 뒤` 상품을 바꿀 때 하단이 언제 바뀌나 / `--find-check 상품` 제품 `find_code`(포커스 확인 포함). 결과는 `CONTROLS.md` "찾기(Ctrl+F) 창·조회 로딩 창". 지울 대상(승인 뒤) |
 | `test_open_screen.py` | **물류 화면 열기만** (09-29, 저장 없음) — `--screen wait` [일반]→[조회] / `stock` 재고검토→[조회] / `logistics` [등록(I)]. `--count` 는 흐름과 같은 함수로 전표 수를 센다(스크롤만) |
 | `test_collect.py` | 수집 RPA. `--check` / `--sms-only` / `--dry-run` |
 | `test_full.py` | 통합 흐름 콘솔 실행. `--modules orders,logistics` 로 기능 선택. 끝나면 창과 같은 리포트(`logs/report_*.html`) |

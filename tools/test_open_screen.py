@@ -44,9 +44,10 @@ def main() -> int:
     if args.screen == "wait":
         screen = logistics_wait.open_screen(target)
         logistics_wait.activate_tab(screen, logistics_wait.TAB_GENERAL)
-        logistics_wait.click_search(screen)
+        loading = logistics_wait.click_search(screen)
         grid = logistics_wait._general_grid(screen)
-        rows = logistics_wait._wait_rows(grid, "일반 탭 그리드", timeout=SETTINGS.timeouts.dialog)
+        rows = logistics_wait._wait_rows(grid, "일반 탭 그리드", timeout=SETTINGS.timeouts.dialog,
+                                         loading=loading)
         print(f"물류대기 [일반] 보이는 행 {rows} (화면 밖 행 있음: {ui.has_hidden_rows(grid)})")
         if args.count:
             print(f"  전표 수 (count_general_slips): {logistics_wait.count_general_slips(grid)}")
@@ -54,10 +55,11 @@ def main() -> int:
     elif args.screen == "stock":
         screen = logistics_wait.open_screen(target)
         logistics_wait.activate_tab(screen, logistics_wait.TAB_STOCK_REVIEW)
-        logistics_wait.click_search(screen)
+        loading = logistics_wait.click_search(screen)
         for auto_id in (logistics_wait.TOP_GRID_AUTO_ID, logistics_wait.BOTTOM_GRID_AUTO_ID):
             grid = logistics_wait._grid(screen, auto_id, auto_id)
-            rows = logistics_wait._wait_rows(grid, auto_id, timeout=SETTINGS.timeouts.dialog)
+            rows = logistics_wait._wait_rows(grid, auto_id, timeout=SETTINGS.timeouts.dialog,
+                                             loading=loading)
             print(f"물류대기 [재고검토] {auto_id} 보이는 행 {rows}")
             if args.count and auto_id == logistics_wait.BOTTOM_GRID_AUTO_ID:
                 print(f"  전표 수: {ui.distinct_count(grid, '전표번호')}")
